@@ -433,3 +433,67 @@ func mustJSON(t *testing.T, v any) json.RawMessage { // any: restates encoding/j
 	}
 	return raw
 }
+
+func TestPlugin_ImagesCanBePurged(t *testing.T) {
+	// Without a tag the only way to clear an optimised image is restarting the
+	// process, and they are cached for thirty days — so an origin that served a
+	// wrong file once would keep serving it for a month.
+	o, srv := newOrigin(t, 400, 300)
+
+	app, err := collage.New(&collage.Config{
+		Logger:   slog.New(slog.NewTextHandler(io.Discard, nil)),
+		Template: collage.TemplateConfig{FS: templates, Extension: ".html"},
+		Plugins:  []collage.Plugin{optiimage.New()},
+		PluginConfig: map[string]json.RawMessage{
+			optiimage.Name: mustJSON(t, optiimage.Config{AllowedOrigins: allow(srv)}),
+		},
+		Cache: collage.CacheConfig{Enabled: true, Type: "memory", MaxEntries: 64},
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	page := collage.NewPage("gallery").
+		WithContent(collage.NewFragment("gallery", "pages/gallery.html").
+			WithDataHandler(func(context.Context, *collage.RenderContext) (any, []string, error) { // any: the framework's own handler signature
+				return struct{ Body string }{Body: `<img src="` + srv.URL + `/a.png" width="200" height="150">`}, nil, nil
+			}).Build()).
+		WithPath("en", "/gallery").
+		Dynamic().
+		Build()
+	if err := app.RegisterPage(page); err != nil {
+		t.Fatalf("RegisterPage: %v", err)
+	}
+	site := app.Handler()
+
+	src := srcOf(t, get(t, site, "/gallery").Body.String())
+	get(t, site, src)
+	cached := o.hits.Load()
+
+	get(t, site, src)
+	if o.hits.Load() != cached {
+		t.Fatal("the second request refetched, so nothing was cached and this proves nothing")
+	}
+
+	if err := app.InvalidateTags(t.Context(), optiimage.Tag); err != nil {
+		t.Fatalf("InvalidateTags: %v", err)
+	}
+	get(t, site, src)
+	if o.hits.Load() == cached {
+		t.Error("the image survived InvalidateTags; there is no way to purge it short of a restart")
+	}
+}
+
+func TestPlugin_OneSourceCanBePurgedAlone(t *testing.T) {
+	_, srv := newOrigin(t, 400, 300)
+	site := newSite(t, optiimage.Config{AllowedOrigins: allow(srv)},
+		`<img src="`+srv.URL+`/a.png" width="200" height="150">`)
+
+	src := srcOf(t, get(t, site, "/gallery").Body.String())
+	get(t, site, src)
+
+	// The tag names the source, so a caller that knows which image changed does not
+	// have to discard every other one to replace it.
+	if got, want := optiimage.SourceTag(srv.URL+"/a.png"), "opti-image:"+srv.URL+"/a.png"; got != want {
+		t.Errorf("SourceTag = %q, want %q", got, want)
+	}
+}

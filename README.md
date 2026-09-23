@@ -161,6 +161,23 @@ An application wanting the lossy modes builds without the tag and calls
 argument for exactly that reason; the bundled encoder ignores it, because there is
 no quality to trade when nothing is discarded.
 
+## Clearing what it has produced
+
+The optimised images live in the framework's cache — nothing is written to disk —
+and they are cached for thirty days. Every one carries a dependency tag, so they can
+be purged without restarting:
+
+```go
+app.InvalidateTags(ctx, optiimage.Tag)                    // all of them
+app.InvalidateTags(ctx, optiimage.SourceTag(imageURL))    // one origin image
+```
+
+The per-source tag is on every size derived from that source, because they are all
+copies of the same thing: a source that changed invalidates them together.
+
+Without tags the only way to clear a wrong image would be restarting the process,
+and thirty days is a long time to serve a file the origin has already corrected.
+
 ## Caching
 
 The images are documents with a 30-day `Incremental` strategy, so the framework

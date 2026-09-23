@@ -102,6 +102,26 @@ func (p *Plugin) Configure(_ context.Context, host collage.ConfigHost) error {
 	return nil
 }
 
+// Tag is the dependency tag every optimised image carries, so an application can
+// purge them all:
+//
+//	app.InvalidateTags(ctx, optiimage.Tag)
+//
+// Without a tag the only way to clear them is restarting the process, since they
+// live in the framework's cache and nothing else knows they are there. That matters
+// more than it looks: an image is cached for thirty days, so an origin that served
+// a wrong file once would otherwise keep serving it for a month.
+const Tag = "opti-image"
+
+// SourceTag is the tag for one origin image, so a single one can be purged without
+// discarding the rest:
+//
+//	app.InvalidateTags(ctx, optiimage.SourceTag(url))
+//
+// Every size derived from that source carries it, because they are all copies of
+// the same thing and a source that changed invalidates all of them together.
+func SourceTag(source string) string { return Tag + ":" + source }
+
 // imageTTL is how long a client and the framework's cache may keep an optimised
 // image. The URL names the source and the size and is signed, so its content cannot
 // change without the URL changing — which makes a long life correct rather than
@@ -224,7 +244,7 @@ func (p *Plugin) handlerFor(format outputFormat) collage.DocumentHandlerFunc {
 				"source", tok.Source, "width", tok.Width, "height", tok.Height, "err", err)
 			return nil, nil, err
 		}
-		return body, nil, nil
+		return body, []string{Tag, SourceTag(tok.Source)}, nil
 	}
 }
 
