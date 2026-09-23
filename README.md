@@ -108,19 +108,46 @@ dark halo.
 
 ## WebP
 
-The standard library has no WebP encoder and every working one needs cgo. A plugin
-that cannot be built without a C toolchain is a plugin most people cannot use, so
-the default build has none and `"webp": true` does nothing on its own.
+Off by default and behind a build tag:
 
-To get it, build with `-tags webp` and register an encoder:
-
-```go
-//go:build webp
-
-func init() { optiimage.RegisterWebPEncoder(myCgoEncoder{}) }
+```
+go build -tags webp ./...
 ```
 
-The tag makes the dependency opt-in; the registration makes it replaceable.
+With the tag, a pure-Go lossless encoder is linked and registered. Without it the
+package has no dependencies at all — which is what the tag is for. It is not a C
+toolchain being gated, as it was when the only working encoders needed cgo; it is a
+dependency most applications will not use.
+
+Then turn it on in configuration:
+
+```json
+{ "elagoht/opti-image": { "webp": true } }
+```
+
+**The encoder is lossless, and that decides whether you want it.** Measured on a
+760×428 diagonal gradient, and on 760×428 of pixel noise standing in for a
+photograph:
+
+| | PNG | JPEG q82 | WebP |
+|---|---|---|---|
+| flat or synthetic | 11,032 | 7,720 | **1,624** |
+| photographic | 976,984 | **231,548** | 977,166 |
+
+Five times smaller than JPEG on the first, four times larger on the second. A
+lossless codec cannot beat a lossy one on a photograph and does not try. Turn it on
+for a site whose images are illustrations, diagrams or interface captures; leave it
+off for one whose images are photographs.
+
+The advantage is size-dependent too, which is easy to miss when checking against a
+small fixture: at 200×150 the same gradient is 492 bytes as PNG and 510 as WebP. The
+container overhead is a fixed cost, and below a few kilobytes it is most of the file.
+Measure at the sizes your site actually serves.
+
+An application wanting the lossy modes builds without the tag and calls
+`RegisterWebPEncoder` with a cgo binding to libwebp. The interface takes a quality
+argument for exactly that reason; the bundled encoder ignores it, because there is
+no quality to trade when nothing is discarded.
 
 ## Caching
 
