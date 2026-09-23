@@ -144,6 +144,18 @@ small fixture: at 200×150 the same gradient is 492 bytes as PNG and 510 as WebP
 container overhead is a fixed cost, and below a few kilobytes it is most of the file.
 Measure at the sizes your site actually serves.
 
+A binary built without the tag but configured with `"webp": true` serves the source
+format and says so at startup:
+
+```
+WARN opti-image: WebP is configured but no encoder is linked; serving the source
+     format instead  fix="build with -tags webp, or call optiimage.RegisterWebPEncoder"
+```
+
+Falling back is right — a missing encoder is a reason to serve PNG, not to refuse to
+start — but doing it silently would leave you reading `"webp": true` in your
+configuration and seeing PNG on the wire with nothing to connect the two.
+
 An application wanting the lossy modes builds without the tag and calls
 `RegisterWebPEncoder` with a cgo binding to libwebp. The interface takes a quality
 argument for exactly that reason; the bundled encoder ignores it, because there is

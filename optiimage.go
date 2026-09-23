@@ -83,6 +83,16 @@ func (p *Plugin) Configure(_ context.Context, host collage.ConfigHost) error {
 		return err
 	}
 
+	// Configured for WebP with nothing able to produce it. Serving the source
+	// format is the right behaviour — a missing encoder is a reason to fall back,
+	// not to refuse to start — but doing it silently would leave an operator
+	// reading "webp": true in their configuration and PNG on the wire, with
+	// nothing anywhere to connect the two.
+	if p.cfg.WebP && webpEncoder == nil {
+		p.log.Warn("opti-image: WebP is configured but no encoder is linked; serving the source format instead",
+			"fix", "build with -tags webp, or call optiimage.RegisterWebPEncoder")
+	}
+
 	signer, err := newSigner()
 	if err != nil {
 		return err
