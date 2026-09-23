@@ -177,11 +177,11 @@ directory so they survive a restart:
 { "elagoht/opti-image": { "cacheDir": "/var/cache/opti-image" } }
 ```
 
-The default is `<os.TempDir()>/collage-opti-image`. **Not the working directory**,
-deliberately: a library that drops files beside your source without being asked is a
-library that turns up in your next commit. The temporary directory is writable almost
-everywhere, survives a restart, and is the operating system's to clean up. Point
-`cacheDir` at a volume if you want the images to outlive a reboot.
+The default is `.cache/opti-image`, relative to the working directory — a dotted
+directory in the project, the way a build tool does it. Findable, one line in
+`.gitignore`, and gone when you delete it. A temporary directory would keep it out of
+sight, which is the problem rather than the point: on macOS that is
+`/var/folders/xy/…/T`, and a cache nobody can find is a cache nobody can clear.
 
 This works at all because the names are content-addressed. A file called
 `8f2a91c0b4e7d3a6.webp` holds one thing and always will, so a restarted process can

@@ -3,7 +3,6 @@ package optiimage
 import (
 	"fmt"
 	"net/url"
-	"os"
 	"path/filepath"
 	"strings"
 	"time"
@@ -43,14 +42,13 @@ type Config struct {
 	// CacheBytes caps the memory held by resized images. Defaults to 64 MiB.
 	CacheBytes int64 `json:"cacheBytes"`
 	// CacheDir is where produced images are kept between restarts. An empty value
-	// means <os.TempDir()>/collage-opti-image.
+	// means ".cache/opti-image", relative to the working directory.
 	//
-	// The default is the temporary directory rather than the working directory on
-	// purpose: a library that drops files beside your source without being asked is
-	// a library that turns up in your next commit. The temporary directory is
-	// writable almost everywhere, survives a restart, and is the operating system's
-	// to clean up. Point this at a volume if you want the images to outlive a
-	// reboot.
+	// A dotted directory in the project, the way a build tool does it — findable,
+	// one line in .gitignore, and gone when you delete it. The temporary directory
+	// would keep it out of sight, which is the problem rather than the point: on
+	// macOS that is /var/folders/xy/…/T, and a cache nobody can find is a cache
+	// nobody can clear.
 	CacheDir string `json:"cacheDir"`
 	// NoDiskCache keeps produced images in memory only, so nothing is written
 	// anywhere. A read-only deployment does not need this — a directory that cannot
@@ -85,7 +83,7 @@ func (c Config) withDefaults() Config {
 		c.CacheBytes = 64 << 20
 	}
 	if c.CacheDir == "" {
-		c.CacheDir = filepath.Join(os.TempDir(), "collage-opti-image")
+		c.CacheDir = filepath.Join(".cache", "opti-image")
 	}
 	if c.Quality <= 0 || c.Quality > 100 {
 		c.Quality = 82
