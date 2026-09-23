@@ -353,37 +353,6 @@ func TestPlugin_NamesAreContentAddressed(t *testing.T) {
 	}
 }
 
-func TestPlugin_WarnsWhenWebPIsAskedForAndNotLinked(t *testing.T) {
-	// Falling back to the source format is right; doing it silently is not. Without
-	// this an operator reads "webp": true in their configuration and sees PNG on
-	// the wire, with nothing anywhere to connect the two.
-	//
-	// In a build carrying the encoder there is nothing to warn about, so the test
-	// asserts the fallback is not announced either.
-	_, srv := newOrigin(t, 40, 30)
-
-	var logged bytes.Buffer
-	app, err := collage.New(&collage.Config{
-		Logger:   slog.New(slog.NewTextHandler(&logged, nil)),
-		Template: collage.TemplateConfig{FS: templates, Extension: ".html"},
-		Plugins:  []collage.Plugin{optiimage.New()},
-		PluginConfig: map[string]json.RawMessage{
-			optiimage.Name: mustJSON(t, optiimage.Config{AllowedOrigins: allow(srv), WebP: true}),
-		},
-	})
-	if err != nil {
-		t.Fatalf("New: %v", err)
-	}
-	if app == nil {
-		t.Fatal("New returned no application")
-	}
-
-	warned := strings.Contains(logged.String(), "no encoder is linked")
-	if warned == webpLinked {
-		t.Errorf("warned=%v with an encoder linked=%v; the two must be opposites", warned, webpLinked)
-	}
-}
-
 func mustJSON(t *testing.T, v any) json.RawMessage { // any: restates encoding/json's own parameter type
 	t.Helper()
 	raw, err := json.Marshal(v)

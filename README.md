@@ -131,22 +131,18 @@ dark halo.
 
 ## WebP
 
-Off by default and behind a build tag:
-
-```
-go build -tags webp ./...
-```
-
-With the tag, a pure-Go lossless encoder is linked and registered. Without it the
-package has no dependencies at all — which is what the tag is for. It is not a C
-toolchain being gated, as it was when the only working encoders needed cgo; it is a
-dependency most applications will not use.
-
-Then turn it on in configuration:
+One switch:
 
 ```json
 { "elagoht/opti-image": { "webp": true } }
 ```
+
+The encoder is linked unconditionally and is pure Go. It used to be behind a `webp`
+build tag, which was the wrong trade twice over: the reason for a tag was that every
+working WebP encoder needed cgo, and this one does not; and two switches where one
+silently overrides the other is a system that reads `"webp": true` and serves PNG.
+WebP is not an optional extra for an image optimiser anyway — gating it is close to
+gating JPEG.
 
 **The encoder is lossless, and that decides whether you want it.** Measured on a
 760×428 diagonal gradient, and on 760×428 of pixel noise standing in for a
@@ -167,20 +163,8 @@ small fixture: at 200×150 the same gradient is 492 bytes as PNG and 510 as WebP
 container overhead is a fixed cost, and below a few kilobytes it is most of the file.
 Measure at the sizes your site actually serves.
 
-A binary built without the tag but configured with `"webp": true` serves the source
-format and says so at startup:
-
-```
-WARN opti-image: WebP is configured but no encoder is linked; serving the source
-     format instead  fix="build with -tags webp, or call optiimage.RegisterWebPEncoder"
-```
-
-Falling back is right — a missing encoder is a reason to serve PNG, not to refuse to
-start — but doing it silently would leave you reading `"webp": true` in your
-configuration and seeing PNG on the wire with nothing to connect the two.
-
-An application wanting the lossy modes builds without the tag and calls
-`RegisterWebPEncoder` with a cgo binding to libwebp. The interface takes a quality
+An application wanting the lossy modes calls `RegisterWebPEncoder` with a cgo
+binding to libwebp, replacing the bundled one. The interface takes a quality
 argument for exactly that reason; the bundled encoder ignores it, because there is
 no quality to trade when nothing is discarded.
 

@@ -1,5 +1,3 @@
-//go:build webp
-
 package optiimage_test
 
 import (

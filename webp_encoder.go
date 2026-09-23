@@ -1,5 +1,3 @@
-//go:build webp
-
 package optiimage
 
 import (
@@ -9,16 +7,23 @@ import (
 	"github.com/HugoSmits86/nativewebp"
 )
 
-// This file is what the "webp" build tag turns on. Without it the package has no
-// dependencies at all, and that is why the tag exists — not because the encoder
-// needs a C toolchain (this one does not), but because a plugin should not hand
-// every application a dependency most of them will not use.
+// The encoder is linked unconditionally, and Config.WebP is the only switch.
 //
-//	go build -tags webp ./...
+// It used to be behind a "webp" build tag, on the reasoning that a plugin should not
+// hand every application a dependency most of them will not use. That was the wrong
+// trade twice over. The original reason for a tag was that every working WebP
+// encoder needed cgo, and this one does not — it is pure Go, so nobody is being
+// handed a toolchain requirement. And a system with two switches where one silently
+// overrides the other is a system that tells you "webp": true and serves PNG; the
+// warning that admitted it was a patch over a design that should not have needed
+// one.
 //
-// An application that wants a different encoder — a cgo binding to libwebp, for the
-// lossy modes this one does not implement — builds without the tag and calls
-// RegisterWebPEncoder itself.
+// WebP is also not an optional extra for an image optimiser. Gating it is close to
+// gating JPEG.
+//
+// An application wanting a different encoder — a cgo binding to libwebp, for the
+// lossy modes this one does not implement — calls RegisterWebPEncoder and replaces
+// this one.
 func init() { RegisterWebPEncoder(nativeWebP{}) }
 
 // nativeWebP encodes lossless WebP in pure Go.
