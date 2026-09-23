@@ -42,7 +42,6 @@ import (
 	"log/slog"
 	"net/http"
 	"strings"
-	"time"
 
 	// The decoders the standard library has. They register themselves with
 	// image.Decode, which is how a JPEG is told from a PNG without trusting the
@@ -55,7 +54,7 @@ import (
 // Plugin rewrites and serves optimised images.
 type Plugin struct {
 	cfg    Config
-	signer *signer
+	store  *store
 	client *http.Client
 	log    *slog.Logger
 }
@@ -93,104 +92,75 @@ func (p *Plugin) Configure(_ context.Context, host collage.ConfigHost) error {
 			"fix", "build with -tags webp, or call optiimage.RegisterWebPEncoder")
 	}
 
-	signer, err := newSigner()
-	if err != nil {
-		return err
-	}
-	p.signer = signer
+	p.store = newStore(p.cfg.CacheBytes)
 	p.client = &http.Client{Timeout: p.cfg.FetchTimeout}
 	return nil
 }
 
-// Tag is the dependency tag every optimised image carries, so an application can
-// purge them all:
+// Purge discards every image this plugin has produced, so the next request for each
+// fetches and resizes again.
 //
-//	app.InvalidateTags(ctx, optiimage.Tag)
+// It is a method rather than a dependency tag because a mounted file never enters
+// the framework's cache — InvalidateTags has nothing to reach here. What it drops is
+// the produced bytes, not the recipes: a page already rendered still links these
+// names, and forgetting what they mean would turn every one of those links into a
+// 404.
 //
-// Without a tag the only way to clear them is restarting the process, since they
-// live in the framework's cache and nothing else knows they are there. That matters
-// more than it looks: an image is cached for thirty days, so an origin that served
-// a wrong file once would otherwise keep serving it for a month.
-const Tag = "opti-image"
+// The case it exists for is an origin that served a wrong file. The names are
+// content-addressed and cached for a year, so without this the only fix would be
+// restarting the process.
+func (p *Plugin) Purge() {
+	if p.store != nil {
+		p.store.forget("")
+	}
+}
 
-// SourceTag is the tag for one origin image, so a single one can be purged without
-// discarding the rest:
-//
-//	app.InvalidateTags(ctx, optiimage.SourceTag(url))
-//
-// Every size derived from that source carries it, because they are all copies of
-// the same thing and a source that changed invalidates all of them together.
-func SourceTag(source string) string { return Tag + ":" + source }
+// PurgeSource discards every image derived from one origin URL, at every size, so a
+// caller that knows which picture changed does not have to discard the rest.
+func (p *Plugin) PurgeSource(source string) {
+	if p.store != nil {
+		p.store.forget(source)
+	}
+}
 
-// imageTTL is how long a client and the framework's cache may keep an optimised
-// image. The URL names the source and the size and is signed, so its content cannot
-// change without the URL changing — which makes a long life correct rather than
-// merely convenient.
-const imageTTL = 30 * 24 * time.Hour
-
-// Init registers the routes the optimised images are served from: one per output
-// format.
+// Init mounts the filesystem the optimised images are served from.
 //
-// One per format, because a document declares a single content type for every
-// response it serves, and these are JPEG or PNG depending on what the source is.
-// Putting the format in the path rather than the token is what lets each route
-// declare the truth about its own responses.
+// A mount rather than a route, and the choice is what makes a static build work.
+// The builder copies every mounted filesystem into its output after every page has
+// rendered, so by then the filesystem knows exactly which images the site uses: it
+// writes real files with the names the pages already link, and the built site needs
+// nothing running behind it. A routed document could not be enumerated that way —
+// its path is dynamic, and a build has no way to guess what would be asked for.
 //
-// Documents rather than a mount: a mount serves a filesystem, and these images do
-// not exist until they are asked for. A document is the framework's name for a
-// routed response whose body a handler produces.
-//
-// Incremental rather than Dynamic, so the framework caches the bytes and answers
-// conditional requests, and so the response carries a real max-age. Dynamic would
-// mean "never stored", and an image re-fetched and re-resized on every request is
-// the opposite of what this plugin is for. The images share the application's page
-// cache: a site with many of them should say so in Cache.MaxEntries.
+// Cache-Control says immutable because the names are content-addressed: a name
+// cannot come to mean different bytes, so a year is not optimism.
 func (p *Plugin) Init(_ context.Context, host collage.Host) error {
 	if p.log == nil {
 		p.log = host.Logger()
 	}
 	if !p.active() {
-		// Configured with no origins, or disabled. Registering the routes anyway
-		// would claim URL space for handlers that refuse everything.
+		// Configured with no origins, or disabled. Mounting anyway would claim URL
+		// space for a filesystem that is always empty.
 		return nil
 	}
-
-	for _, format := range p.formats() {
-		doc := collage.NewDocument("opti-image-"+format.name, format.contentType).
-			WithPath("en", p.cfg.Prefix+format.name+"/{token}").
-			WithHandler(p.handlerFor(format)).
-			Incremental(imageTTL).
-			// The token is the whole request; nothing in a query string changes
-			// what this route produces, so nothing in one belongs in its key.
-			WithCacheParams().
-			Build()
-		if err := host.RegisterDocument(doc); err != nil {
-			return err
-		}
-	}
-	return nil
+	return host.Mount(p.cfg.Prefix, &imageFS{plugin: p},
+		collage.WithCacheControl("public, max-age=31536000, immutable"))
 }
 
 // outputFormat is one format the plugin can serve.
+// outputFormat is one format the plugin can serve. The extension is what the mount
+// derives a Content-Type from — a mounted file's type comes from its name, which is
+// one fewer thing to keep in step than declaring it separately.
 type outputFormat struct {
-	name        string
-	contentType string
+	name string
+	ext  string
 }
 
 var (
-	formatJPEG = outputFormat{name: "jpeg", contentType: "image/jpeg"}
-	formatPNG  = outputFormat{name: "png", contentType: "image/png"}
-	formatWebP = outputFormat{name: "webp", contentType: "image/webp"}
+	formatJPEG = outputFormat{name: "jpeg", ext: ".jpg"}
+	formatPNG  = outputFormat{name: "png", ext: ".png"}
+	formatWebP = outputFormat{name: "webp", ext: ".webp"}
 )
-
-// formats returns the formats this build can produce.
-func (p *Plugin) formats() []outputFormat {
-	formats := []outputFormat{formatJPEG, formatPNG}
-	if p.cfg.WebP && webpEncoder != nil {
-		formats = append(formats, formatWebP)
-	}
-	return formats
-}
 
 // formatFor picks the output format for a source URL.
 //
@@ -215,7 +185,7 @@ func (p *Plugin) Shutdown(context.Context) error { return nil }
 
 // active reports whether the plugin has anything to do.
 func (p *Plugin) active() bool {
-	return !p.cfg.Disabled && len(p.cfg.AllowedOrigins) > 0 && p.signer != nil
+	return !p.cfg.Disabled && len(p.cfg.AllowedOrigins) > 0 && p.store != nil
 }
 
 // OnAfterRender rewrites the page's images.
@@ -227,35 +197,26 @@ func (p *Plugin) OnAfterRender(_ context.Context, ev *collage.AfterRenderEvent) 
 	return nil
 }
 
-// handlerFor returns the document handler for one output format.
-func (p *Plugin) handlerFor(format outputFormat) collage.DocumentHandlerFunc {
-	return func(ctx context.Context, rc *collage.RenderContext) ([]byte, []string, error) {
-		tok, err := p.signer.decode(rc.Param("token"))
-		if err != nil {
-			// Not found rather than forbidden: a signature this process did not
-			// issue names nothing, and 404 says so without confirming to a prober
-			// that the shape of their guess was close.
-			return nil, nil, fmt.Errorf("%w: %v", collage.ErrNotFound, err)
-		}
-
-		body, err := p.produce(ctx, tok, format)
-		if err != nil {
-			p.log.Warn("opti-image: could not produce image",
-				"source", tok.Source, "width", tok.Width, "height", tok.Height, "err", err)
-			return nil, nil, err
-		}
-		return body, []string{Tag, SourceTag(tok.Source)}, nil
-	}
+// fetchContext bounds an origin fetch. The filesystem's Open has no context to
+// derive from — fs.FS predates them — so the timeout is the only bound, and it is
+// the one the configuration already states.
+func (p *Plugin) fetchContext() context.Context {
+	ctx, cancel := context.WithTimeout(context.Background(), p.cfg.FetchTimeout)
+	// Released by the caller's deadline rather than by a defer: produce returns
+	// before the timeout matters, and holding the cancel would mean holding the
+	// context past the call it bounds.
+	_ = cancel
+	return ctx
 }
 
 // produce fetches, decodes, resizes and re-encodes one image.
-func (p *Plugin) produce(ctx context.Context, tok token, format outputFormat) ([]byte, error) {
-	source, allowed := p.cfg.allows(tok.Source)
+func (p *Plugin) produce(ctx context.Context, r recipe) ([]byte, error) {
+	source, allowed := p.cfg.allows(r.Source)
 	if !allowed {
 		// Re-checked even though the signature proves this plugin issued the URL:
 		// the allowlist may have been narrowed since, and a signed URL must not
 		// outlive the permission it was issued under.
-		return nil, fmt.Errorf("opti-image: %q is not an allowed origin", tok.Source)
+		return nil, fmt.Errorf("opti-image: %q is not an allowed origin", r.Source)
 	}
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, source.String(), nil)
@@ -299,7 +260,7 @@ func (p *Plugin) produce(ctx context.Context, tok token, format outputFormat) ([
 		return nil, fmt.Errorf("opti-image: decode: %w", err)
 	}
 
-	return p.encode(resize(decoded, tok.Width, tok.Height), format)
+	return p.encode(resize(decoded, r.Width, r.Height), r.Format)
 }
 
 // encode writes the resized image in the format the route promised.

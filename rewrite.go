@@ -57,8 +57,16 @@ func (p *Plugin) rewriteTag(tag []byte) []byte {
 		return tag
 	}
 
-	format := p.formatFor(src)
-	replacement := p.cfg.Prefix + format.name + "/" + p.signer.encode(token{Source: src, Width: width, Height: height})
+	// Recorded before it is linked, which is the whole mechanism: the store is the
+	// only record that a name exists, and a static build reads it to discover which
+	// images the site uses.
+	name := p.store.record(recipe{
+		Source: src,
+		Width:  width,
+		Height: height,
+		Format: p.formatFor(src),
+	})
+	replacement := p.cfg.Prefix + name
 
 	out := make([]byte, 0, len(tag)+len(replacement))
 	out = append(out, tag[:srcStart]...)

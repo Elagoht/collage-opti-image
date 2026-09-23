@@ -3,7 +3,6 @@ package optiimage_test
 import (
 	"bytes"
 	"context"
-	"encoding/base64"
 	"encoding/json"
 	"image"
 	"image/color"
@@ -74,20 +73,19 @@ var templates = fstest.MapFS{
 // newSite builds a site whose one page renders bodyHTML verbatim.
 func newSite(t *testing.T, cfg optiimage.Config, bodyHTML string) http.Handler {
 	t.Helper()
+	return newSiteWith(t, optiimage.NewWith(cfg), bodyHTML)
+}
 
-	raw, err := json.Marshal(cfg)
-	if err != nil {
-		t.Fatalf("marshal config: %v", err)
-	}
+// newSiteWith builds the site around a plugin the caller keeps a handle on, which
+// is what a test calling Purge needs.
+func newSiteWith(t *testing.T, plug *optiimage.Plugin, bodyHTML string) http.Handler {
+	t.Helper()
 
 	app, err := collage.New(&collage.Config{
 		Logger:   slog.New(slog.NewTextHandler(io.Discard, nil)),
 		Template: collage.TemplateConfig{FS: templates, Extension: ".html"},
-		Plugins:  []collage.Plugin{optiimage.New()},
-		PluginConfig: map[string]json.RawMessage{
-			optiimage.Name: raw,
-		},
-		Cache: collage.CacheConfig{Enabled: true, Type: "memory", MaxEntries: 64},
+		Plugins:  []collage.Plugin{plug},
+		Cache:    collage.CacheConfig{Enabled: true, Type: "memory", MaxEntries: 64},
 	})
 	if err != nil {
 		t.Fatalf("New: %v", err)
@@ -199,52 +197,6 @@ func TestPlugin_UserinfoCannotForgeAnAllowedOrigin(t *testing.T) {
 	}
 }
 
-func TestPlugin_RefusesAnUnsignedURL(t *testing.T) {
-	// The endpoint takes a URL from the request and fetches it. Unsigned, that is
-	// a server-side request forgery primitive reachable by anyone who can read the
-	// page's HTML.
-	o, srv := newOrigin(t, 40, 30)
-	site := newSite(t, optiimage.Config{AllowedOrigins: allow(srv)},
-		`<img src="`+srv.URL+`/a.png" width="20" height="10">`)
-
-	for _, forged := range []string{
-		"/_image/png/not-a-token",
-		"/_image/png/aaaa." + encodeSource("http://169.254.169.254/latest/meta-data/"),
-		"/_image/jpeg/.",
-	} {
-		rec := get(t, site, forged)
-		if rec.Code == http.StatusOK {
-			t.Errorf("GET %s = 200; a forged token was honoured", forged)
-		}
-	}
-	if o.hits.Load() != 0 {
-		t.Errorf("a forged token caused %d origin fetches", o.hits.Load())
-	}
-}
-
-func TestPlugin_TamperingWithASignedTokenIsRefused(t *testing.T) {
-	o, srv := newOrigin(t, 400, 300)
-	site := newSite(t, optiimage.Config{AllowedOrigins: allow(srv)},
-		`<img src="`+srv.URL+`/a.png" width="20" height="10">`)
-
-	src := srcOf(t, get(t, site, "/gallery").Body.String())
-	if get(t, site, src).Code != http.StatusOK {
-		t.Fatal("the genuine URL does not work, so the tampering test proves nothing")
-	}
-	before := o.hits.Load()
-
-	// Flip a character in the payload, leaving the signature.
-	signature, payload, _ := strings.Cut(strings.TrimPrefix(src, "/_image/png/"), ".")
-	tampered := "/_image/png/" + signature + "." + flipFirst(payload)
-
-	if rec := get(t, site, tampered); rec.Code == http.StatusOK {
-		t.Errorf("a tampered payload was accepted")
-	}
-	if o.hits.Load() != before {
-		t.Error("a tampered token reached the origin")
-	}
-}
-
 func TestPlugin_ServesFromCacheOnTheSecondRequest(t *testing.T) {
 	o, srv := newOrigin(t, 400, 300)
 	site := newSite(t, optiimage.Config{AllowedOrigins: allow(srv)},
@@ -350,47 +302,54 @@ func TestPlugin_LeavesDataSrcAlone(t *testing.T) {
 	}
 }
 
-func encodeSource(raw string) string {
-	// Deliberately not the plugin's encoding: this is what an attacker can build
-	// without the key, which is the point.
-	return strings.NewReplacer("/", "_", ":", "-").Replace(raw)
-}
-
-func flipFirst(s string) string {
-	if s == "" {
-		return "x"
-	}
-	if s[0] == 'A' {
-		return "B" + s[1:]
-	}
-	return "A" + s[1:]
-}
-
-func TestPlugin_SignatureStopsForgedWorkAgainstAnAllowedOrigin(t *testing.T) {
-	// The allowlist is re-checked when the image is produced, so a token naming
-	// some other host is refused whether or not it is signed. What the signature
-	// alone prevents is this: a structurally valid token naming an origin that *is*
-	// allowed, at any size the requester likes.
-	//
-	// Without it, anyone who can read the page can ask for a 9999x9999 resize of
-	// every image on the site, as many distinct sizes as they care to type — each
-	// one a fetch, a decode, a resize, and a cache entry. That is a denial of
-	// service built entirely out of legitimate-looking requests.
-	o, srv := newOrigin(t, 400, 300)
+// A name the plugin never minted stands for nothing, which is the whole of the
+// access control now: the request carries a filename, not a URL to fetch, so there
+// is nothing for a caller to point somewhere else.
+func TestPlugin_AnInventedNameIsNotFound(t *testing.T) {
+	o, srv := newOrigin(t, 40, 30)
 	site := newSite(t, optiimage.Config{AllowedOrigins: allow(srv)},
 		`<img src="`+srv.URL+`/a.png" width="20" height="10">`)
 
-	// Exactly the encoding the plugin uses, with a signature it did not produce.
-	payload := base64.RawURLEncoding.EncodeToString(
-		[]byte(srv.URL + "/a.png\x009999\x009999"))
-	forged := "/_image/png/" + strings.Repeat("A", 43) + "." + payload
-
-	before := o.hits.Load()
-	if rec := get(t, site, forged); rec.Code == http.StatusOK {
-		t.Error("a forged signature was honoured for an allowed origin")
+	for _, invented := range []string{
+		"/_image/deadbeefdeadbeefdeadbeefdeadbeef.png",
+		"/_image/../../etc/passwd",
+		"/_image/",
+	} {
+		// A mount answers 404 for any Open failure, so this pins the outcome
+		// rather than the mechanism: whatever goes wrong with a name nothing
+		// minted, the reader is told the file is not there and the origin is never
+		// contacted.
+		if rec := get(t, site, invented); rec.Code != http.StatusNotFound {
+			t.Errorf("GET %s = %d, want 404", invented, rec.Code)
+		}
 	}
-	if o.hits.Load() != before {
-		t.Error("a forged token reached the origin")
+	if o.hits.Load() != 0 {
+		t.Errorf("an invented name caused %d origin fetches", o.hits.Load())
+	}
+}
+
+func TestPlugin_NamesAreContentAddressed(t *testing.T) {
+	// Two pages asking for the same picture at the same size share one file, and a
+	// different size is a different file. That is what makes "cache forever"
+	// honest: a name cannot come to mean different bytes.
+	_, srv := newOrigin(t, 400, 300)
+
+	same := newSite(t, optiimage.Config{AllowedOrigins: allow(srv)},
+		`<img src="`+srv.URL+`/a.png" width="200" height="150">`+
+			`<img src="`+srv.URL+`/a.png" width="200" height="150">`)
+	body := get(t, same, "/gallery").Body.String()
+	names := srcAttr.FindAllStringSubmatch(body, -1)
+	if len(names) != 2 {
+		t.Fatalf("got %d img elements, want 2", len(names))
+	}
+	if names[0][1] != names[1][1] {
+		t.Errorf("one picture at one size produced two names: %q and %q", names[0][1], names[1][1])
+	}
+
+	other := newSite(t, optiimage.Config{AllowedOrigins: allow(srv)},
+		`<img src="`+srv.URL+`/a.png" width="100" height="75">`)
+	if got := srcOf(t, get(t, other, "/gallery").Body.String()); got == names[0][1] {
+		t.Error("a different size produced the same name")
 	}
 }
 
@@ -434,36 +393,14 @@ func mustJSON(t *testing.T, v any) json.RawMessage { // any: restates encoding/j
 	return raw
 }
 
-func TestPlugin_ImagesCanBePurged(t *testing.T) {
-	// Without a tag the only way to clear an optimised image is restarting the
-	// process, and they are cached for thirty days — so an origin that served a
-	// wrong file once would keep serving it for a month.
+// The images live in the plugin's own store, not the framework's cache — a mounted
+// file never enters that — so purging is a method rather than a dependency tag.
+// Without it the only fix for an origin that served a wrong file would be restarting
+// the process, and these are cached for a year.
+func TestPlugin_ProducedImagesCanBePurged(t *testing.T) {
 	o, srv := newOrigin(t, 400, 300)
-
-	app, err := collage.New(&collage.Config{
-		Logger:   slog.New(slog.NewTextHandler(io.Discard, nil)),
-		Template: collage.TemplateConfig{FS: templates, Extension: ".html"},
-		Plugins:  []collage.Plugin{optiimage.New()},
-		PluginConfig: map[string]json.RawMessage{
-			optiimage.Name: mustJSON(t, optiimage.Config{AllowedOrigins: allow(srv)}),
-		},
-		Cache: collage.CacheConfig{Enabled: true, Type: "memory", MaxEntries: 64},
-	})
-	if err != nil {
-		t.Fatalf("New: %v", err)
-	}
-	page := collage.NewPage("gallery").
-		WithContent(collage.NewFragment("gallery", "pages/gallery.html").
-			WithDataHandler(func(context.Context, *collage.RenderContext) (any, []string, error) { // any: the framework's own handler signature
-				return struct{ Body string }{Body: `<img src="` + srv.URL + `/a.png" width="200" height="150">`}, nil, nil
-			}).Build()).
-		WithPath("en", "/gallery").
-		Dynamic().
-		Build()
-	if err := app.RegisterPage(page); err != nil {
-		t.Fatalf("RegisterPage: %v", err)
-	}
-	site := app.Handler()
+	p := optiimage.NewWith(optiimage.Config{AllowedOrigins: allow(srv)})
+	site := newSiteWith(t, p, `<img src="`+srv.URL+`/a.png" width="200" height="150">`)
 
 	src := srcOf(t, get(t, site, "/gallery").Body.String())
 	get(t, site, src)
@@ -474,26 +411,41 @@ func TestPlugin_ImagesCanBePurged(t *testing.T) {
 		t.Fatal("the second request refetched, so nothing was cached and this proves nothing")
 	}
 
-	if err := app.InvalidateTags(t.Context(), optiimage.Tag); err != nil {
-		t.Fatalf("InvalidateTags: %v", err)
+	p.Purge()
+
+	rec := get(t, site, src)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("after Purge the image is %d, want 200 — purging drops the bytes, not the name", rec.Code)
 	}
-	get(t, site, src)
 	if o.hits.Load() == cached {
-		t.Error("the image survived InvalidateTags; there is no way to purge it short of a restart")
+		t.Error("the image survived Purge")
 	}
 }
 
 func TestPlugin_OneSourceCanBePurgedAlone(t *testing.T) {
-	_, srv := newOrigin(t, 400, 300)
-	site := newSite(t, optiimage.Config{AllowedOrigins: allow(srv)},
-		`<img src="`+srv.URL+`/a.png" width="200" height="150">`)
+	o, srv := newOrigin(t, 400, 300)
+	p := optiimage.NewWith(optiimage.Config{AllowedOrigins: allow(srv)})
+	site := newSiteWith(t, p,
+		`<img src="`+srv.URL+`/a.png" width="200" height="150">`+
+			`<img src="`+srv.URL+`/b.png" width="200" height="150">`)
 
-	src := srcOf(t, get(t, site, "/gallery").Body.String())
-	get(t, site, src)
+	matches := srcAttr.FindAllStringSubmatch(get(t, site, "/gallery").Body.String(), -1)
+	if len(matches) != 2 {
+		t.Fatalf("got %d images, want 2", len(matches))
+	}
+	first, second := matches[0][1], matches[1][1]
+	get(t, site, first)
+	get(t, site, second)
+	cached := o.hits.Load()
 
-	// The tag names the source, so a caller that knows which image changed does not
-	// have to discard every other one to replace it.
-	if got, want := optiimage.SourceTag(srv.URL+"/a.png"), "opti-image:"+srv.URL+"/a.png"; got != want {
-		t.Errorf("SourceTag = %q, want %q", got, want)
+	p.PurgeSource(srv.URL + "/a.png")
+
+	get(t, site, second)
+	if o.hits.Load() != cached {
+		t.Error("purging one source dropped another's image")
+	}
+	get(t, site, first)
+	if o.hits.Load() == cached {
+		t.Error("the purged source was still served from the store")
 	}
 }

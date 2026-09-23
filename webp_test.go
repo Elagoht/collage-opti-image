@@ -23,8 +23,8 @@ func TestWebP_IsServedWhenEnabledAndLinked(t *testing.T) {
 		`<img src="`+srv.URL+`/a.png" width="200" height="150">`)
 
 	src := srcOf(t, get(t, site, "/gallery").Body.String())
-	if !strings.HasPrefix(src, "/_image/webp/") {
-		t.Fatalf("src = %q, want the webp route — the encoder is linked in this build", src)
+	if !strings.HasSuffix(src, ".webp") {
+		t.Fatalf("src = %q, want a .webp name — the encoder is linked in this build", src)
 	}
 
 	rec := get(t, site, src)
@@ -54,8 +54,8 @@ func TestWebP_ConfiguredOffStillServesTheSourceFormat(t *testing.T) {
 	site := newSite(t, optiimage.Config{AllowedOrigins: allow(srv)},
 		`<img src="`+srv.URL+`/a.png" width="200" height="150">`)
 
-	if src := srcOf(t, get(t, site, "/gallery").Body.String()); !strings.HasPrefix(src, "/_image/png/") {
-		t.Errorf("src = %q, want the png route", src)
+	if src := srcOf(t, get(t, site, "/gallery").Body.String()); !strings.HasSuffix(src, ".png") {
+		t.Errorf("src = %q, want a .png name", src)
 	}
 }
 

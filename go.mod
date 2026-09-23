@@ -7,9 +7,8 @@ module github.com/Elagoht/collage-opti-image
 
 go 1.26
 
-require github.com/Elagoht/collage v0.1.0
-
 require (
-	github.com/HugoSmits86/nativewebp v1.3.0 // indirect
-	golang.org/x/image v0.24.0 // indirect
+	github.com/Elagoht/collage v0.2.0
+	github.com/HugoSmits86/nativewebp v1.3.0
+	golang.org/x/image v0.24.0
 )

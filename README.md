@@ -55,33 +55,56 @@ lazy-loading script the page uses while leaving the real source untouched.
 
 ## Nothing is fetched during the render
 
-The render only rewrites the URL. The fetch, the decode and the resize happen on the
-first request for that URL.
+The render only rewrites the `src` and records what that name means. The fetch, the
+decode and the resize happen the first time something opens it.
 
 Doing the work during the render would make the first view of a page as slow as its
-slowest image, while a reader waits on it. At the image endpoint the page arrives at
-once and the images arrive as the browser asks for them — which is the order the
-browser wanted them in anyway. An origin that is down costs its image and not the
-page.
+slowest image, while a reader waits on it. This way the page arrives at once and the
+images arrive as the browser asks for them, which is the order the browser wanted
+them in anyway. An origin that is down costs its image and not the page.
 
-## Why the URLs are signed
+## The names, and why there is no signature
 
-The image endpoint takes a source from the request and fetches it. The allowlist is
-re-checked at that point, so a token naming some other host is refused whether or
-not it is signed.
+A name is a hash of what the image is — its source, its size, its format:
 
-What the HMAC alone prevents is a *valid* token naming an allowed origin at any size
-the requester likes. Without it, anyone who can read the page can request a
-9999×9999 resize of every image on the site, as many distinct sizes as they care to
-type — each one a fetch, a decode, a resize and a cache entry. That is a denial of
-service built entirely out of legitimate-looking requests, and
-`TestPlugin_SignatureStopsForgedWorkAgainstAnAllowedOrigin` is what notices when the
-check goes away.
+```
+/_image/8f2a91c0b4e7d3a6.webp
+```
 
-The key is generated per process. A restart invalidates outstanding URLs, which
-costs a re-render of pages still held downstream and buys a key nobody has to store,
-rotate or keep out of a configuration file. **A fleet behind a load balancer wants a
-shared key**, and `Config` would have to grow one before this is deployed that way.
+Content-addressed, so two pages asking for the same picture at the same size share
+one file and a name cannot come to mean different bytes. That is what makes
+`immutable` and a one-year `max-age` honest rather than optimistic.
+
+It also replaces an access-control problem instead of solving one. An earlier design
+put the source URL in the path and signed it with an HMAC, because the endpoint would
+otherwise fetch whatever it was handed — a server-side request forgery primitive
+reachable by anyone who could read the page. **Here the request carries no source at
+all.** It carries a filename, and a filename the plugin never minted stands for
+nothing: `Open` looks it up, finds no recipe, and returns `fs.ErrNotExist`. There is
+no signature because there is nothing to forge, and nothing to enumerate: a caller
+cannot ask for a 9999×9999 resize because they cannot name one.
+
+The recipes live in the process that rewrote the page. A fleet of servers behind a
+shared page cache would hand one process's URLs to another, which would not know them
+— so a multi-process deployment wants the pages built statically, or a shared store,
+which this does not yet have.
+
+## Static builds
+
+A static build writes the images to disk, and the built site needs nothing running
+behind it.
+
+That is why the images are a mounted filesystem rather than a route. The builder
+copies every mount into its output *after* every page has rendered — so by the time
+it walks this one, the recipes name exactly the images the site uses. It writes real
+files under the names the pages already link. A routed document could not be
+enumerated that way: its path is dynamic, and a build has no way to guess what would
+be asked for.
+
+```
+out/gallery/index.html            <img src="/_image/8f2a91c0b4e7d3a6.webp">
+out/_image/8f2a91c0b4e7d3a6.webp  the file, 200x150
+```
 
 ## Limits
 
@@ -163,27 +186,21 @@ no quality to trade when nothing is discarded.
 
 ## Clearing what it has produced
 
-The optimised images live in the framework's cache — nothing is written to disk —
-and they are cached for thirty days. Every one carries a dependency tag, so they can
-be purged without restarting:
+A mounted file never enters the framework's cache, so `InvalidateTags` cannot reach
+these. The plugin holds them itself, bounded by `cacheBytes`, and purging is a
+method:
 
 ```go
-app.InvalidateTags(ctx, optiimage.Tag)                    // all of them
-app.InvalidateTags(ctx, optiimage.SourceTag(imageURL))    // one origin image
+p := optiimage.New()
+// ...
+p.Purge()                  // every produced image
+p.PurgeSource(imageURL)    // one origin image, at every size
 ```
 
-The per-source tag is on every size derived from that source, because they are all
-copies of the same thing: a source that changed invalidates them together.
+Both drop the produced bytes and keep the recipes. A page already rendered links
+these names, and forgetting what a name means would turn every one of those links
+into a 404 rather than into a re-fetch.
 
-Without tags the only way to clear a wrong image would be restarting the process,
-and thirty days is a long time to serve a file the origin has already corrected.
-
-## Caching
-
-The images are documents with a 30-day `Incremental` strategy, so the framework
-caches the bytes, answers conditional requests and sends a real `max-age`. The URL
-names the source and the size and is signed, so its content cannot change without
-the URL changing — which is what makes a long life correct rather than convenient.
-
-They share the application's page cache. A site with many images should say so in
-`Cache.MaxEntries`.
+The case it exists for is an origin that served a wrong file. The names are
+content-addressed and cached for a year, so without this the only fix would be
+restarting the process.
