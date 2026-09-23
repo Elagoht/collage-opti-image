@@ -42,6 +42,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strings"
+	"time"
 
 	// The decoders the standard library has. They register themselves with
 	// image.Decode, which is how a JPEG is told from a PNG without trusting the
@@ -90,7 +91,7 @@ func (p *Plugin) Configure(_ context.Context, host collage.ConfigHost) error {
 		})
 	}
 	p.store = newStore(p.cfg.CacheBytes, d)
-	p.client = &http.Client{Timeout: p.cfg.FetchTimeout}
+	p.client = &http.Client{Timeout: time.Duration(p.cfg.FetchTimeout)}
 	return nil
 }
 
@@ -198,7 +199,7 @@ func (p *Plugin) OnAfterRender(_ context.Context, ev *collage.AfterRenderEvent) 
 // derive from — fs.FS predates them — so the timeout is the only bound, and it is
 // the one the configuration already states.
 func (p *Plugin) fetchContext() context.Context {
-	ctx, cancel := context.WithTimeout(context.Background(), p.cfg.FetchTimeout)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(p.cfg.FetchTimeout))
 	// Released by the caller's deadline rather than by a defer: produce returns
 	// before the timeout matters, and holding the cancel would mean holding the
 	// context past the call it bounds.

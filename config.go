@@ -1,6 +1,7 @@
 package optiimage
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/url"
 	"path/filepath"
@@ -38,7 +39,10 @@ type Config struct {
 	// bitmap — the decompression bomb — and the byte limit above does not see it.
 	MaxPixels int `json:"maxPixels"`
 	// FetchTimeout bounds a single origin fetch. Defaults to 10s.
-	FetchTimeout time.Duration `json:"fetchTimeout"`
+	//
+	// In JSON it is written the way a person writes a duration — "10s", "500ms" —
+	// as well as as a number of nanoseconds. See Duration.
+	FetchTimeout Duration `json:"fetchTimeout"`
 	// CacheBytes caps the memory held by resized images. Defaults to 64 MiB.
 	CacheBytes int64 `json:"cacheBytes"`
 	// CacheDir is where produced images are kept between restarts. An empty value
@@ -77,7 +81,7 @@ func (c Config) withDefaults() Config {
 		c.MaxPixels = 40_000_000
 	}
 	if c.FetchTimeout <= 0 {
-		c.FetchTimeout = 10 * time.Second
+		c.FetchTimeout = Duration(10 * time.Second)
 	}
 	if c.CacheBytes <= 0 {
 		c.CacheBytes = 64 << 20
@@ -129,4 +133,42 @@ func (c Config) allows(raw string) (*url.URL, bool) {
 		}
 	}
 	return nil, false
+}
+
+// Duration is a time.Duration that reads "10s" from JSON as well as a number.
+//
+// encoding/json unmarshals a time.Duration from a number of nanoseconds and from
+// nothing else, so a configuration file written by a person — which is what a
+// plugin configuration file is — fails on the only spelling that person was ever
+// going to use. "fetchTimeout": "10s" is what everybody writes; 10000000000 is what
+// nobody does.
+//
+// The number is still accepted, because a file written by a program is a file
+// somewhere, and refusing it would break it for the sake of tidiness.
+type Duration time.Duration
+
+// UnmarshalJSON accepts "10s" and 10000000000 alike.
+func (d *Duration) UnmarshalJSON(data []byte) error {
+	var asNumber int64
+	if err := json.Unmarshal(data, &asNumber); err == nil {
+		*d = Duration(asNumber)
+		return nil
+	}
+
+	var asText string
+	if err := json.Unmarshal(data, &asText); err != nil {
+		return fmt.Errorf("opti-image: fetchTimeout must be a duration such as \"10s\", or nanoseconds: %w", err)
+	}
+	parsed, err := time.ParseDuration(asText)
+	if err != nil {
+		return fmt.Errorf("opti-image: fetchTimeout %q: %w", asText, err)
+	}
+	*d = Duration(parsed)
+	return nil
+}
+
+// MarshalJSON writes the form a person reads, so a configuration round-trips into
+// something still worth editing.
+func (d Duration) MarshalJSON() ([]byte, error) {
+	return json.Marshal(time.Duration(d).String())
 }
