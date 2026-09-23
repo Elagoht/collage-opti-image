@@ -54,14 +54,18 @@ type store struct {
 	bodies   map[string][]byte
 	bytes    int64
 	maxBytes int64
-	modTime  time.Time
+	// disk keeps produced images between restarts. Nil when the application asked
+	// for memory only.
+	disk    *disk
+	modTime time.Time
 }
 
-func newStore(maxBytes int64) *store {
+func newStore(maxBytes int64, d *disk) *store {
 	return &store{
 		recipes:  make(map[string]recipe),
 		bodies:   make(map[string][]byte),
 		maxBytes: maxBytes,
+		disk:     d,
 		// One timestamp for every image, fixed at startup. A content-addressed
 		// name cannot describe changing content, so If-Modified-Since has nothing
 		// to be right or wrong about, and a per-file time would only vary with
@@ -98,11 +102,27 @@ func (s *store) names() []string {
 	return out
 }
 
+// body returns a produced image, from memory or from disk.
+//
+// Disk is consulted second and promoted into memory, so a restarted process pays one
+// read rather than a fetch, a decode and a resize — and pays it once.
 func (s *store) body(name string) ([]byte, bool) {
 	s.mu.RLock()
-	defer s.mu.RUnlock()
 	b, ok := s.bodies[name]
-	return b, ok
+	s.mu.RUnlock()
+	if ok {
+		return b, true
+	}
+
+	if s.disk == nil {
+		return nil, false
+	}
+	b, ok = s.disk.read(name)
+	if !ok {
+		return nil, false
+	}
+	s.remember(name, b)
+	return b, true
 }
 
 // keep stores produced bytes, bounded by total size.
@@ -113,6 +133,18 @@ func (s *store) body(name string) ([]byte, bool) {
 // a class of bugs — for a plugin whose failure mode under memory pressure should be
 // "slower", not "subtly wrong".
 func (s *store) keep(name string, body []byte) {
+	s.remember(name, body)
+	if s.disk == nil {
+		return
+	}
+	// A failed write is not worth failing a request over: the image is already
+	// produced and in memory, and the only cost is producing it again after a
+	// restart. newDisk reports the first failure and stops trying.
+	_ = s.disk.write(name, body)
+}
+
+// remember holds body in memory, bounded by total size.
+func (s *store) remember(name string, body []byte) {
 	size := int64(len(body))
 	if size > s.maxBytes {
 		return
@@ -140,6 +172,15 @@ func (s *store) forget(source string) {
 	defer s.mu.Unlock()
 
 	if source == "" {
+		for name := range s.bodies {
+			s.removeFromDisk(name)
+		}
+		// Recipes, not bodies: an image produced by an earlier process is on disk
+		// under a name this one may not have minted yet, and purging has to reach
+		// it or a wrong image survives the purge that was meant to remove it.
+		for name := range s.recipes {
+			s.removeFromDisk(name)
+		}
 		s.bodies = make(map[string][]byte)
 		s.bytes = 0
 		return
@@ -152,6 +193,14 @@ func (s *store) forget(source string) {
 			s.bytes -= int64(len(body))
 			delete(s.bodies, name)
 		}
+		s.removeFromDisk(name)
+	}
+}
+
+// removeFromDisk drops a stored file. Called with s.mu held.
+func (s *store) removeFromDisk(name string) {
+	if s.disk != nil {
+		s.disk.remove(name)
 	}
 }
 

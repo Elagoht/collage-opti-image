@@ -3,6 +3,8 @@ package optiimage
 import (
 	"fmt"
 	"net/url"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 )
@@ -40,6 +42,21 @@ type Config struct {
 	FetchTimeout time.Duration `json:"fetchTimeout"`
 	// CacheBytes caps the memory held by resized images. Defaults to 64 MiB.
 	CacheBytes int64 `json:"cacheBytes"`
+	// CacheDir is where produced images are kept between restarts. An empty value
+	// means <os.TempDir()>/collage-opti-image.
+	//
+	// The default is the temporary directory rather than the working directory on
+	// purpose: a library that drops files beside your source without being asked is
+	// a library that turns up in your next commit. The temporary directory is
+	// writable almost everywhere, survives a restart, and is the operating system's
+	// to clean up. Point this at a volume if you want the images to outlive a
+	// reboot.
+	CacheDir string `json:"cacheDir"`
+	// NoDiskCache keeps produced images in memory only, so nothing is written
+	// anywhere. A read-only deployment does not need this — a directory that cannot
+	// be created or written to disables the disk cache by itself, with one line in
+	// the log — but a deployment that would rather not write at all can say so.
+	NoDiskCache bool `json:"noDiskCache"`
 	// Quality is the JPEG quality of re-encoded images, 1..100. Defaults to 82.
 	Quality int `json:"quality"`
 	// WebP re-encodes to WebP where an encoder is available. The default build
@@ -66,6 +83,9 @@ func (c Config) withDefaults() Config {
 	}
 	if c.CacheBytes <= 0 {
 		c.CacheBytes = 64 << 20
+	}
+	if c.CacheDir == "" {
+		c.CacheDir = filepath.Join(os.TempDir(), "collage-opti-image")
 	}
 	if c.Quality <= 0 || c.Quality > 100 {
 		c.Quality = 82

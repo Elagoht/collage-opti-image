@@ -82,7 +82,14 @@ func (p *Plugin) Configure(_ context.Context, host collage.ConfigHost) error {
 		return err
 	}
 
-	p.store = newStore(p.cfg.CacheBytes)
+	var d *disk
+	if !p.cfg.NoDiskCache {
+		d = newDisk(p.cfg.CacheDir, func(err error) {
+			p.log.Warn("opti-image: disk cache unavailable, keeping images in memory only",
+				"dir", p.cfg.CacheDir, "err", err)
+		})
+	}
+	p.store = newStore(p.cfg.CacheBytes, d)
 	p.client = &http.Client{Timeout: p.cfg.FetchTimeout}
 	return nil
 }

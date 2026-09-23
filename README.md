@@ -168,6 +168,36 @@ binding to libwebp, replacing the bundled one. The interface takes a quality
 argument for exactly that reason; the bundled encoder ignores it, because there is
 no quality to trade when nothing is discarded.
 
+## Where the images live
+
+Produced images are held in memory, bounded by `cacheBytes`, and written to a
+directory so they survive a restart:
+
+```json
+{ "elagoht/opti-image": { "cacheDir": "/var/cache/opti-image" } }
+```
+
+The default is `<os.TempDir()>/collage-opti-image`. **Not the working directory**,
+deliberately: a library that drops files beside your source without being asked is a
+library that turns up in your next commit. The temporary directory is writable almost
+everywhere, survives a restart, and is the operating system's to clean up. Point
+`cacheDir` at a volume if you want the images to outlive a reboot.
+
+This works at all because the names are content-addressed. A file called
+`8f2a91c0b4e7d3a6.webp` holds one thing and always will, so a restarted process can
+use what an earlier one produced without validating it and without an expiry. A cache
+keyed on a location would need both.
+
+A directory that cannot be created or written to disables the disk cache, once, with
+a line in the log — a read-only deployment is a normal deployment, and a plugin that
+refuses to start on one, or that retries the same failing write for every image, is
+worse than one that keeps everything in memory. `"noDiskCache": true` says the same
+thing on purpose rather than by accident.
+
+Writes go through a temporary file and a rename, so a reader never sees a
+half-written image. Two processes producing the same image concurrently is normal —
+they agree on the name, because the name is the content.
+
 ## Clearing what it has produced
 
 A mounted file never enters the framework's cache, so `InvalidateTags` cannot reach
@@ -181,7 +211,7 @@ p.Purge()                  // every produced image
 p.PurgeSource(imageURL)    // one origin image, at every size
 ```
 
-Both drop the produced bytes and keep the recipes. A page already rendered links
+Both drop the produced bytes, remove the files, and keep the recipes. A page already rendered links
 these names, and forgetting what a name means would turn every one of those links
 into a 404 rather than into a re-fetch.
 
