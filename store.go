@@ -243,13 +243,21 @@ func (f *imageFS) Open(name string) (fs.File, error) {
 		return &imageDir{fs: f}, nil
 	}
 
+	// Disk first, and deliberately before the recipe.
+	//
+	// A restarted process has not rendered anything yet, so it knows no recipes —
+	// but the file an earlier process wrote is still the right answer, because the
+	// name is the content. Requiring a recipe here meant a 404 for every image
+	// requested before its page happened to be rendered again: a CDN revalidating,
+	// a browser with the page still cached, a crawler following a link. The file
+	// exists only because this plugin wrote it, so serving it needs nothing else.
+	if body, cached := f.plugin.store.body(name); cached {
+		return newImageFile(name, body, f.plugin.store.modTime), nil
+	}
+
 	r, known := f.plugin.store.lookup(name)
 	if !known {
 		return nil, &fs.PathError{Op: "open", Path: name, Err: fs.ErrNotExist}
-	}
-
-	if body, cached := f.plugin.store.body(name); cached {
-		return newImageFile(name, body, f.plugin.store.modTime), nil
 	}
 
 	body, err := f.plugin.produce(f.plugin.fetchContext(), r)

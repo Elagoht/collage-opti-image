@@ -123,3 +123,36 @@ func TestDisk_NoDiskCacheWritesNothing(t *testing.T) {
 		t.Errorf("NoDiskCache wrote %d files", len(entries))
 	}
 }
+
+// TestDisk_ServesAStoredImageWithoutRenderingItsPage is the case the first restart
+// test missed by rendering the gallery before asking for the image.
+//
+// A restarted process knows no recipes until something renders. Meanwhile a CDN
+// revalidating, a browser holding the page from before, or a crawler following a
+// link all ask for the image directly — and got a 404, with the file sitting on
+// disk the whole time.
+func TestDisk_ServesAStoredImageWithoutRenderingItsPage(t *testing.T) {
+	o, srv := newOrigin(t, 400, 300)
+	dir := t.TempDir()
+	markup := `<img src="` + srv.URL + `/a.png" width="200" height="150">`
+
+	first := newSiteWith(t, optiimage.NewWith(optiimage.Config{
+		AllowedOrigins: allow(srv), CacheDir: dir,
+	}), markup)
+	src := srcOf(t, get(t, first, "/gallery").Body.String())
+	get(t, first, src)
+
+	// A fresh application over the same directory, asked for the image and nothing
+	// else. No page is rendered, so no recipe exists.
+	second := newSiteWith(t, optiimage.NewWith(optiimage.Config{
+		AllowedOrigins: allow(srv), CacheDir: dir,
+	}), markup)
+
+	rec := get(t, second, src)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 — the file is on disk and the name is its content", rec.Code)
+	}
+	if o.hits.Load() != 1 {
+		t.Errorf("origin fetches = %d, want 1", o.hits.Load())
+	}
+}
