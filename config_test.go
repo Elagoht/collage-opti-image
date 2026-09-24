@@ -61,3 +61,43 @@ func TestDuration_MarshalsReadably(t *testing.T) {
 		t.Errorf("Marshal = %s, want %q", out, "1m30s")
 	}
 }
+
+// "webp" was a boolean, and a configuration written for it reads the same. "auto"
+// is the third value.
+func TestWebPMode_ReadsTheBooleansAndAuto(t *testing.T) {
+	for _, tc := range []struct {
+		json string
+		want WebPMode
+	}{
+		{`{"webp":false}`, WebPOff},
+		{`{"webp":true}`, WebPOn},
+		{`{"webp":"auto"}`, WebPAuto},
+		{`{}`, WebPOff},
+	} {
+		var cfg Config
+		if err := json.Unmarshal([]byte(tc.json), &cfg); err != nil {
+			t.Errorf("Unmarshal(%s) = %v, want nil", tc.json, err)
+			continue
+		}
+		if cfg.WebP != tc.want {
+			t.Errorf("Unmarshal(%s) = %v, want %v", tc.json, cfg.WebP, tc.want)
+		}
+		out, err := json.Marshal(cfg.WebP)
+		if err != nil {
+			t.Fatalf("Marshal = %v", err)
+		}
+		var back WebPMode
+		if err := json.Unmarshal(out, &back); err != nil || back != tc.want {
+			t.Errorf("round trip of %v through %s = %v, %v", tc.want, out, back, err)
+		}
+	}
+}
+
+func TestWebPMode_RefusesNonsense(t *testing.T) {
+	for _, in := range []string{`"yes"`, `"Auto"`, `1`, `{}`} {
+		var m WebPMode
+		if err := json.Unmarshal([]byte(in), &m); err == nil {
+			t.Errorf("Unmarshal(%s) = nil error, want a refusal", in)
+		}
+	}
+}

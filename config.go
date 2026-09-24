@@ -61,10 +61,9 @@ type Config struct {
 	NoDiskCache bool `json:"noDiskCache"`
 	// Quality is the JPEG quality of re-encoded images, 1..100. Defaults to 82.
 	Quality int `json:"quality"`
-	// WebP re-encodes to WebP where an encoder is available. The default build
-	// has none — encoding WebP needs cgo — so this does nothing unless the binary
-	// was built with the "webp" tag and an encoder registered. See webp.go.
-	WebP bool `json:"webp"`
+	// WebP says which images are re-encoded to WebP: none, all, or — "auto" — only
+	// those that would otherwise be lossless. See WebPMode.
+	WebP WebPMode `json:"webp"`
 	// Disabled turns the plugin off without removing it from the application.
 	Disabled bool `json:"disabled"`
 }
@@ -171,4 +170,59 @@ func (d *Duration) UnmarshalJSON(data []byte) error {
 // something still worth editing.
 func (d Duration) MarshalJSON() ([]byte, error) {
 	return json.Marshal(time.Duration(d).String())
+}
+
+// WebPMode says which images are re-encoded as WebP.
+//
+// Three values rather than a switch, because the bundled encoder is lossless and
+// that splits a site's images in two. Measured on a real blog: a 640x360 card was
+// 28–42 KB as JPEG q82 and 155–206 KB as WebP, a 1280x720 cover 91–101 KB against
+// 250–352 KB — while a 256x256 avatar with a PNG source was 80 KB as PNG and 63 KB
+// as WebP. "On" is right for a site of diagrams and wrong for a site of photographs,
+// and most sites are both.
+//
+// In JSON it is false, true or "auto". The booleans are what the switch used to be,
+// and a configuration written for it still reads the same.
+type WebPMode uint8
+
+const (
+	// WebPOff never encodes WebP. It is the zero value.
+	WebPOff WebPMode = iota
+	// WebPOn encodes every image as WebP.
+	WebPOn
+	// WebPAuto encodes as WebP only what would otherwise be lossless — PNG and GIF
+	// sources, and images with transparency — and leaves photographs as JPEG.
+	WebPAuto
+)
+
+// UnmarshalJSON accepts false, true and "auto".
+func (m *WebPMode) UnmarshalJSON(data []byte) error {
+	var asBool bool
+	if err := json.Unmarshal(data, &asBool); err == nil {
+		if asBool {
+			*m = WebPOn
+		} else {
+			*m = WebPOff
+		}
+		return nil
+	}
+
+	var asText string
+	if err := json.Unmarshal(data, &asText); err != nil || asText != "auto" {
+		return fmt.Errorf("opti-image: webp must be true, false or \"auto\", not %s", data)
+	}
+	*m = WebPAuto
+	return nil
+}
+
+// MarshalJSON writes the spelling UnmarshalJSON reads.
+func (m WebPMode) MarshalJSON() ([]byte, error) {
+	switch m {
+	case WebPOn:
+		return []byte("true"), nil
+	case WebPAuto:
+		return []byte(`"auto"`), nil
+	default:
+		return []byte("false"), nil
+	}
 }

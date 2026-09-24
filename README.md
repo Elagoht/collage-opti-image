@@ -26,7 +26,7 @@ images from, and that happens while the application is built.
     "maxPixels": 40000000,
     "fetchTimeout": "10s",
     "quality": 82,
-    "webp": false
+    "webp": "auto"
   }
 }
 ```
@@ -170,11 +170,21 @@ dark halo.
 
 ## WebP
 
-One switch:
+Three values:
 
 ```json
-{ "elagoht/opti-image": { "webp": true } }
+{ "elagoht/opti-image": { "webp": "auto" } }
 ```
+
+- `false`, the default: no WebP.
+- `true`: every image is WebP.
+- `"auto"`: only what would otherwise be lossless — PNG and GIF sources, and images
+  with transparency — is WebP; photographs stay JPEG. This is the one to use on a
+  site that has both, which is most of them.
+
+`true` and `false` are what the setting used to be, and a configuration written for
+them reads the same. In Go the field is a `WebPMode`: `optiimage.WebPOff`,
+`optiimage.WebPOn`, `optiimage.WebPAuto`.
 
 The encoder is linked unconditionally and is pure Go. It used to be behind a `webp`
 build tag, which was the wrong trade twice over: the reason for a tag was that every
@@ -193,9 +203,18 @@ photograph:
 | photographic | 976,984 | **231,548** | 977,166 |
 
 Five times smaller than JPEG on the first, four times larger on the second. A
-lossless codec cannot beat a lossy one on a photograph and does not try. Turn it on
-for a site whose images are illustrations, diagrams or interface captures; leave it
-off for one whose images are photographs.
+lossless codec cannot beat a lossy one on a photograph and does not try. The same
+shows on a real blog:
+
+| | JPEG q82 | PNG | WebP |
+|---|---|---|---|
+| card, 640×360 photograph | **28–42 KB** | | 155–206 KB |
+| cover, 1280×720 photograph | **91–101 KB** | | 250–352 KB |
+| avatar, 256×256, PNG source | | 80 KB | **63 KB** |
+
+Which is what `"auto"` does: WebP where it replaces a PNG, JPEG where it would
+replace one. `true` is for a site whose images are all illustrations, diagrams or
+interface captures.
 
 The advantage is size-dependent too, which is easy to miss when checking against a
 small fixture: at 200×150 the same gradient is 492 bytes as PNG and 510 as WebP. The

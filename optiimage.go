@@ -167,6 +167,10 @@ var (
 	// it and http.ServeContent sniffs the bytes: the Content-Type is whatever was
 	// actually encoded, and the name stays the one the page was rendered with.
 	formatAuto = outputFormat{name: "auto", ext: ""}
+	// formatAutoWebP is formatAuto under "webp": "auto": what would stay lossless
+	// becomes WebP instead of PNG. A separate format rather than a flag read at
+	// fetch time, because it changes the bytes and so has to change the name.
+	formatAutoWebP = outputFormat{name: "auto-webp", ext: ""}
 )
 
 // formatsByName reads a persisted recipe's format back, and formatsByExt says which
@@ -177,7 +181,7 @@ var (
 )
 
 func init() {
-	for _, f := range []outputFormat{formatJPEG, formatPNG, formatWebP, formatAuto} {
+	for _, f := range []outputFormat{formatJPEG, formatPNG, formatWebP, formatAuto, formatAutoWebP} {
 		formatsByName[f.name] = f
 		formatsByExt[f.ext] = f
 	}
@@ -195,21 +199,29 @@ func init() {
 // Anything else is formatAuto, decided from the decoded image. Guessing JPEG for
 // an extensionless URL was right for photographs and wrong for every transparent
 // PNG a CMS stores under a UUID, which became a JPEG on a black background.
+//
+// Under WebPAuto, what would be lossless is WebP and a photograph stays JPEG,
+// because the bundled encoder is lossless: it beats PNG and loses to JPEG badly.
 func (p *Plugin) formatFor(source *url.URL) outputFormat {
-	if p.cfg.WebP && webpEncoder != nil {
+	linked := webpEncoder != nil
+	if p.cfg.WebP == WebPOn && linked {
 		return formatWebP
+	}
+	lossless, auto := formatPNG, formatAuto
+	if p.cfg.WebP == WebPAuto && linked {
+		lossless, auto = formatWebP, formatAutoWebP
 	}
 	switch strings.ToLower(path.Ext(source.Path)) {
 	case ".png", ".gif":
-		return formatPNG
+		return lossless
 	case ".jpg", ".jpeg":
 		return formatJPEG
 	default:
-		return formatAuto
+		return auto
 	}
 }
 
-// settle turns formatAuto into the format the decoded image calls for, and returns
+// settle turns formatAuto and formatAutoWebP into the format the decoded image calls for, and returns
 // any other format unchanged.
 //
 // The decoder's word, not the origin's Content-Type, which is a claim a CMS gets
@@ -219,11 +231,17 @@ func (p *Plugin) formatFor(source *url.URL) outputFormat {
 // the one thing a JPEG cannot carry, and it covers a decoder an application
 // registered for a format this package does not know.
 func settle(f outputFormat, sourceFormat string, img image.Image) outputFormat {
-	if f != formatAuto {
+	var lossless outputFormat
+	switch f {
+	case formatAuto:
+		lossless = formatPNG
+	case formatAutoWebP:
+		lossless = formatWebP
+	default:
 		return f
 	}
 	if sourceFormat == "png" || sourceFormat == "gif" || !opaque(img) {
-		return formatPNG
+		return lossless
 	}
 	return formatJPEG
 }
