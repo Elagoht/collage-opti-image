@@ -137,13 +137,29 @@ out/_image/8f2a91c0b4e7d3a6.webp  the file, 200x150
 
 ## Output format
 
-Chosen from the source's extension, because the image is not fetched at rewrite
-time. A PNG or GIF becomes a PNG; everything else becomes a JPEG. A PNG is not
-re-encoded as JPEG: that drops its transparency and puts a black rectangle where the
-page expected to see through.
+Chosen from the source's extension where it has one, because the image is not
+fetched at rewrite time. A `.png` or `.gif` becomes a PNG and a `.jpg` or `.jpeg` a
+JPEG. A PNG is not re-encoded as JPEG: that drops its transparency and puts a black
+rectangle where the page expected to see through. The extension is the path's, so
+`/a.png?v=3` is a PNG.
 
-Each format is its own route, because a collage document declares one content type
-for every response it serves — so "which format" has to be part of which route.
+A source whose URL does not say — `/uploads/cover/<uuid>`, which is most of what a
+CMS serves — is decided when it is decoded. A PNG or GIF, or any image with
+transparency, stays lossless; anything else becomes a JPEG. The decoder decides, not
+the origin's `Content-Type`, which is a claim, and which a CMS often sends as
+`application/octet-stream`.
+
+Its name has no extension, because the format is not known when the page is
+rendered and the name cannot change after it:
+
+```
+/_image/8f2a91c0b4e7d3a6e1c9b8a7f6d5e4c3
+```
+
+A mounted file's type comes from its extension, so with none `http.ServeContent`
+sniffs the bytes, and the `Content-Type` is whatever was actually encoded. A static
+build writes the file without an extension too; a static host will usually send it
+as `application/octet-stream`, which browsers display in an `<img>` all the same.
 
 Resizing is area averaging, standard library only. Nearest-neighbour downscaling is
 where aliasing comes from: a one-pixel line either survives whole or vanishes, so a

@@ -59,7 +59,8 @@ func (p *Plugin) rewriteTag(tag []byte) []byte {
 	if !okW || !okH || width <= 0 || height <= 0 {
 		return tag
 	}
-	if _, allowed := p.cfg.allows(src); !allowed {
+	source, allowed := p.cfg.allows(src)
+	if !allowed {
 		return tag
 	}
 
@@ -70,7 +71,7 @@ func (p *Plugin) rewriteTag(tag []byte) []byte {
 		Source: src,
 		Width:  width,
 		Height: height,
-		Format: p.formatFor(src),
+		Format: p.formatFor(source),
 	})
 	// Escaped on the way back for the same reason it was decoded on the way in. The
 	// name is hex, but the prefix is configuration, and a quote in it would end the

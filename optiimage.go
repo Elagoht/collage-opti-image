@@ -41,6 +41,8 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"net/url"
+	"path"
 	"strings"
 	"time"
 
@@ -158,6 +160,13 @@ var (
 	formatJPEG = outputFormat{name: "jpeg", ext: ".jpg"}
 	formatPNG  = outputFormat{name: "png", ext: ".png"}
 	formatWebP = outputFormat{name: "webp", ext: ".webp"}
+
+	// formatAuto is decided when the source is decoded, for a source whose URL does
+	// not say what it is — /uploads/cover/<uuid>, which is most of what a CMS
+	// serves. The name has no extension, so the mount has no type to derive from
+	// it and http.ServeContent sniffs the bytes: the Content-Type is whatever was
+	// actually encoded, and the name stays the one the page was rendered with.
+	formatAuto = outputFormat{name: "auto", ext: ""}
 )
 
 // formatsByName reads a persisted recipe's format back, and formatsByExt says which
@@ -168,7 +177,7 @@ var (
 )
 
 func init() {
-	for _, f := range []outputFormat{formatJPEG, formatPNG, formatWebP} {
+	for _, f := range []outputFormat{formatJPEG, formatPNG, formatWebP, formatAuto} {
 		formatsByName[f.name] = f
 		formatsByExt[f.ext] = f
 	}
@@ -176,21 +185,55 @@ func init() {
 
 // formatFor picks the output format for a source URL.
 //
-// From the source's extension, because that is the only thing known at rewrite
-// time — the image itself is not fetched until someone asks for it. A PNG stays a
-// PNG: re-encoding one as JPEG drops its transparency and puts a black rectangle
-// where the page expected to see through.
-func (p *Plugin) formatFor(source string) outputFormat {
+// From the source's extension where it has one, because that is the only thing
+// known at rewrite time — the image itself is not fetched until someone asks for
+// it. A PNG stays a PNG: re-encoding one as JPEG drops its transparency and puts a
+// black rectangle where the page expected to see through.
+//
+// The extension is the path's, not the string's: "/a.png?v=3" is a PNG.
+//
+// Anything else is formatAuto, decided from the decoded image. Guessing JPEG for
+// an extensionless URL was right for photographs and wrong for every transparent
+// PNG a CMS stores under a UUID, which became a JPEG on a black background.
+func (p *Plugin) formatFor(source *url.URL) outputFormat {
 	if p.cfg.WebP && webpEncoder != nil {
 		return formatWebP
 	}
-	switch {
-	case strings.HasSuffix(strings.ToLower(source), ".png"),
-		strings.HasSuffix(strings.ToLower(source), ".gif"):
+	switch strings.ToLower(path.Ext(source.Path)) {
+	case ".png", ".gif":
 		return formatPNG
-	default:
+	case ".jpg", ".jpeg":
 		return formatJPEG
+	default:
+		return formatAuto
 	}
+}
+
+// settle turns formatAuto into the format the decoded image calls for, and returns
+// any other format unchanged.
+//
+// The decoder's word, not the origin's Content-Type, which is a claim a CMS gets
+// wrong often enough — application/octet-stream is common — and which the decode
+// has already checked. A PNG or GIF source stays lossless, as it would have with
+// its extension. So does any image with transparency, whatever it was: that is
+// the one thing a JPEG cannot carry, and it covers a decoder an application
+// registered for a format this package does not know.
+func settle(f outputFormat, sourceFormat string, img image.Image) outputFormat {
+	if f != formatAuto {
+		return f
+	}
+	if sourceFormat == "png" || sourceFormat == "gif" || !opaque(img) {
+		return formatPNG
+	}
+	return formatJPEG
+}
+
+// opaque reports whether img has no transparency. An image that cannot say is
+// treated as having some: the cost of the wrong answer that way is a larger file,
+// and the other way it is a black rectangle.
+func opaque(img image.Image) bool {
+	o, ok := img.(interface{ Opaque() bool })
+	return ok && o.Opaque()
 }
 
 func (p *Plugin) Shutdown(context.Context) error { return nil }
@@ -268,12 +311,12 @@ func (p *Plugin) produce(ctx context.Context, r recipe) ([]byte, error) {
 			config.Width, config.Height, p.cfg.MaxPixels)
 	}
 
-	decoded, _, err := image.Decode(bytes.NewReader(body))
+	decoded, sourceFormat, err := image.Decode(bytes.NewReader(body))
 	if err != nil {
 		return nil, fmt.Errorf("opti-image: decode: %w", err)
 	}
 
-	return p.encode(resize(decoded, r.Width, r.Height), r.Format)
+	return p.encode(resize(decoded, r.Width, r.Height), settle(r.Format, sourceFormat, decoded))
 }
 
 // encode writes the resized image in the format the route promised.
