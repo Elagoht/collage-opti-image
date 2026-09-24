@@ -31,6 +31,29 @@ images from, and that happens while the application is built.
 }
 ```
 
+### `NewWith` and the JSON
+
+`NewWith(optiimage.Config{...})` sets a starting point, and the application's JSON
+configuration is decoded over it, key by key:
+
+- **a key the JSON has replaces the value entirely.** Arrays are not merged: with
+  `NewWith(Config{AllowedOrigins: a})` and `"allowedOrigins": [b]` in the JSON, the
+  plugin allows `b` and not `a`.
+- **a key the JSON lacks leaves the `NewWith` value.** With `"quality": 60` and no
+  `allowedOrigins` in the JSON, the plugin allows `a` at quality 60.
+- **with no `"elagoht/opti-image"` entry at all,** the `NewWith` value is the whole
+  configuration.
+
+Defaults are filled in afterwards, for whatever is still unset either way. The slice
+you pass is copied, so decoding never writes into it.
+
+```go
+optiimage.NewWith(optiimage.Config{
+	AllowedOrigins: []optiimage.Origin{{Scheme: "https", Host: "cms.example.com"}},
+	WebP:           optiimage.WebPAuto,
+})
+```
+
 **An empty `allowedOrigins` disables the plugin.** It never means "any host". A
 fetcher that defaults to fetching anything is a server-side request forgery
 primitive wearing a feature's name.

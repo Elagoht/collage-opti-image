@@ -486,6 +486,37 @@ func TestPlugin_OneSourceCanBePurgedAlone(t *testing.T) {
 	}
 }
 
+// NewWith is a starting point the JSON configuration is decoded over: a key the
+// JSON has replaces the value entirely — an allowedOrigins array is not merged
+// with NewWith's — and a key it lacks leaves NewWith's value alone.
+func TestNewWith_TheJSONReplacesWhatItNamesAndKeepsTheRest(t *testing.T) {
+	_, fromGo := newOrigin(t, 40, 30)
+	_, fromJSON := newOrigin(t, 40, 30)
+	markup := `<img src="` + fromGo.URL + `/a.png" width="20" height="10">` +
+		`<img src="` + fromJSON.URL + `/a.png" width="20" height="10">`
+	rewritten := func(h http.Handler) []bool {
+		var out []bool
+		for _, m := range srcAttr.FindAllStringSubmatch(get(t, h, "/gallery").Body.String(), -1) {
+			out = append(out, strings.HasPrefix(m[1], "/_image/"))
+		}
+		return out
+	}
+
+	replaced := newSiteConfigured(t,
+		optiimage.NewWith(optiimage.Config{AllowedOrigins: allow(fromGo), CacheDir: t.TempDir()}),
+		mustJSON(t, map[string][]optiimage.Origin{"allowedOrigins": allow(fromJSON)}), markup)
+	if got := rewritten(replaced); len(got) != 2 || got[0] || !got[1] {
+		t.Errorf("with allowedOrigins in the JSON, rewritten = %v, want [false true]", got)
+	}
+
+	kept := newSiteConfigured(t,
+		optiimage.NewWith(optiimage.Config{AllowedOrigins: allow(fromGo), CacheDir: t.TempDir()}),
+		json.RawMessage(`{"quality":60}`), markup)
+	if got := rewritten(kept); len(got) != 2 || !got[0] || got[1] {
+		t.Errorf("without allowedOrigins in the JSON, rewritten = %v, want [true false]", got)
+	}
+}
+
 // Decoding over NewWith's value must not write into the caller's slice.
 // encoding/json reuses a slice's backing array, so without a copy the JSON's
 // origins overwrote the ones the caller still held.
