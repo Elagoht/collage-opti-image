@@ -21,6 +21,11 @@ type recipe struct {
 	Width  int
 	Height int
 	Format outputFormat
+	// Alpha is the AlphaThreshold an auto format is settled with. Part of the
+	// recipe, not read from the configuration when the image is made, so a name
+	// always stands for one decision: change the threshold and the images it
+	// affects get new names rather than new bytes under old ones.
+	Alpha float64
 }
 
 // name is the file this recipe is served as.
@@ -36,8 +41,14 @@ type recipe struct {
 // carries a name, and a name the plugin did not mint stands for nothing. There is
 // no signature because there is nothing to forge.
 func (r recipe) name() string {
-	sum := sha256.Sum256([]byte(r.Source + "|" +
-		strconv.Itoa(r.Width) + "x" + strconv.Itoa(r.Height) + "|" + r.Format.name))
+	key := r.Source + "|" + strconv.Itoa(r.Width) + "x" + strconv.Itoa(r.Height) + "|" + r.Format.name
+	if r.Format.auto() {
+		// The rule an auto format is settled by is part of what the image is.
+		// "alpha2" names the rule that ignores nearly opaque pixels; the first one
+		// counted any, so its images are made again under names of their own.
+		key += "|alpha2:" + strconv.FormatFloat(r.Alpha, 'g', -1, 64)
+	}
+	sum := sha256.Sum256([]byte(key))
 	return hex.EncodeToString(sum[:16]) + r.Format.ext
 }
 
@@ -70,15 +81,16 @@ func validName(name string) bool {
 
 // persistedRecipe is a recipe as it is written beside the image it produces.
 type persistedRecipe struct {
-	Source string `json:"source"`
-	Width  int    `json:"width"`
-	Height int    `json:"height"`
-	Format string `json:"format"`
+	Source string  `json:"source"`
+	Width  int     `json:"width"`
+	Height int     `json:"height"`
+	Format string  `json:"format"`
+	Alpha  float64 `json:"alpha,omitempty"`
 }
 
 func (r recipe) marshal() ([]byte, error) {
 	return json.Marshal(persistedRecipe{
-		Source: r.Source, Width: r.Width, Height: r.Height, Format: r.Format.name,
+		Source: r.Source, Width: r.Width, Height: r.Height, Format: r.Format.name, Alpha: r.Alpha,
 	})
 }
 
@@ -98,7 +110,7 @@ func unmarshalRecipe(name string, data []byte) (recipe, bool) {
 	if !known || p.Width <= 0 || p.Height <= 0 {
 		return recipe{}, false
 	}
-	r := recipe{Source: p.Source, Width: p.Width, Height: p.Height, Format: format}
+	r := recipe{Source: p.Source, Width: p.Width, Height: p.Height, Format: format, Alpha: p.Alpha}
 	if r.name() != name {
 		return recipe{}, false
 	}

@@ -67,11 +67,17 @@ func (p *Plugin) rewriteTag(tag []byte) []byte {
 	// Recorded before it is linked, which is the whole mechanism: the store is the
 	// only record that a name exists, and a static build reads it to discover which
 	// images the site uses.
+	format := p.formatFor(source)
+	var alpha float64
+	if format.auto() {
+		alpha = p.cfg.AlphaThreshold
+	}
 	name := p.store.record(recipe{
 		Source: src,
 		Width:  width,
 		Height: height,
-		Format: p.formatFor(source),
+		Format: format,
+		Alpha:  alpha,
 	})
 	// Escaped on the way back for the same reason it was decoded on the way in. The
 	// name is hex, but the prefix is configuration, and a quote in it would end the

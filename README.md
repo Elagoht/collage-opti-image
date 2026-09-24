@@ -205,6 +205,23 @@ Three values:
   with transparency — is WebP; photographs stay JPEG. This is the one to use on a
   site that has both, which is most of them.
 
+**What counts as transparency.** A pixel at least 98% opaque never does: a
+photograph a CMS stored with an alpha channel, whose only non-opaque pixels are a
+few dozen of edge anti-aliasing at 254, is a photograph, and goes to JPEG. It used
+to take one such pixel to send a 1280×720 cover to lossless WebP at 249 KB instead
+of a 101 KB JPEG. Pixels that are visibly transparent still keep an image lossless;
+`alphaThreshold` lets a share of them go:
+
+```json
+{ "elagoht/opti-image": { "webp": "auto", "alphaThreshold": 0.001 } }
+```
+
+A thousandth of the pixels, there. Keep it low: a photograph with rounded,
+transparent corners judged opaque becomes a JPEG with square ones. A pixel written
+to a JPEG shows its own colour, not the darker premultiplied one. The threshold is
+part of each image's name, so changing it produces new files rather than changing
+what an old name serves.
+
 `true` and `false` are what the setting used to be, and a configuration written for
 them reads the same. In Go the field is a `WebPMode`: `optiimage.WebPOff`,
 `optiimage.WebPOn`, `optiimage.WebPAuto`.

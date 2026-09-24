@@ -34,6 +34,7 @@ import (
 	"context"
 	"fmt"
 	"image"
+	"image/color"
 	"image/jpeg"
 	"image/png"
 	"io"
@@ -179,6 +180,9 @@ var (
 	formatAutoWebP = outputFormat{name: "auto-webp", ext: ""}
 )
 
+// auto reports whether f is decided from the decoded image rather than the URL.
+func (f outputFormat) auto() bool { return f == formatAuto || f == formatAutoWebP }
+
 // formatsByName reads a persisted recipe's format back, and formatsByExt says which
 // extensions a name can carry. Every format is in both.
 var (
@@ -236,7 +240,7 @@ func (p *Plugin) formatFor(source *url.URL) outputFormat {
 // its extension. So does any image with transparency, whatever it was: that is
 // the one thing a JPEG cannot carry, and it covers a decoder an application
 // registered for a format this package does not know.
-func settle(f outputFormat, sourceFormat string, img image.Image) outputFormat {
+func settle(f outputFormat, sourceFormat string, img image.Image, alphaThreshold float64) outputFormat {
 	var lossless outputFormat
 	switch f {
 	case formatAuto:
@@ -246,11 +250,65 @@ func settle(f outputFormat, sourceFormat string, img image.Image) outputFormat {
 	default:
 		return f
 	}
-	if sourceFormat == "png" || sourceFormat == "gif" || !opaque(img) {
+	if sourceFormat == "png" || sourceFormat == "gif" || !nearlyOpaque(img, alphaThreshold) {
 		return lossless
 	}
 	return formatJPEG
 }
+
+// visiblyTransparent is the alpha below which a pixel's transparency can be seen:
+// under 98% opaque. Above it, a pixel shown opaque is indistinguishable from the
+// pixel as it is.
+const visiblyTransparent = 250
+
+// nearlyOpaque reports whether at most threshold of img's pixels are visibly
+// transparent.
+//
+// Counted rather than asked of the image, because Opaque answers whether every
+// pixel is fully opaque: a photograph a CMS stored with an alpha channel, where a
+// few dozen pixels along an edge sit at 254, is not opaque by that answer and is
+// by any reader's.
+func nearlyOpaque(img image.Image, threshold float64) bool {
+	if opaque(img) {
+		return true
+	}
+	bounds := img.Bounds()
+	total := bounds.Dx() * bounds.Dy()
+	if total == 0 {
+		return true
+	}
+	allowed := int(threshold * float64(total))
+	seen := 0
+	for y := bounds.Min.Y; y < bounds.Max.Y; y++ {
+		for x := bounds.Min.X; x < bounds.Max.X; x++ {
+			if _, _, _, a := img.At(x, y).RGBA(); a>>8 < visiblyTransparent {
+				seen++
+				if seen > allowed {
+					return false
+				}
+			}
+		}
+	}
+	return true
+}
+
+// opaqueView shows an image with every pixel fully opaque, in its own colour.
+//
+// A JPEG has no alpha channel, and the standard encoder writes a pixel's
+// premultiplied colour — so an image judged opaque while a few of its pixels were
+// not came out with those pixels darkened toward black. This shows each at the
+// colour it has, which is what it looks like at 98% opacity or more.
+type opaqueView struct{ image.Image }
+
+func (v opaqueView) ColorModel() color.Model { return color.NRGBAModel }
+
+func (v opaqueView) At(x, y int) color.Color {
+	c := color.NRGBAModel.Convert(v.Image.At(x, y)).(color.NRGBA)
+	c.A = 0xff
+	return c
+}
+
+func (v opaqueView) Opaque() bool { return true }
 
 // opaque reports whether img has no transparency. An image that cannot say is
 // treated as having some: the cost of the wrong answer that way is a larger file,
@@ -340,7 +398,7 @@ func (p *Plugin) produce(ctx context.Context, r recipe) ([]byte, error) {
 		return nil, fmt.Errorf("opti-image: decode: %w", err)
 	}
 
-	return p.encode(resize(decoded, r.Width, r.Height), settle(r.Format, sourceFormat, decoded))
+	return p.encode(resize(decoded, r.Width, r.Height), settle(r.Format, sourceFormat, decoded, r.Alpha))
 }
 
 // encode writes the resized image in the format the route promised.
@@ -361,6 +419,9 @@ func (p *Plugin) encode(img image.Image, format outputFormat) ([]byte, error) {
 			return nil, err
 		}
 	default:
+		if !opaque(img) {
+			img = opaqueView{img}
+		}
 		if err := jpeg.Encode(&buf, img, &jpeg.Options{Quality: p.cfg.Quality}); err != nil {
 			return nil, err
 		}

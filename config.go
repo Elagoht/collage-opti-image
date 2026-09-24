@@ -64,6 +64,17 @@ type Config struct {
 	// WebP says which images are re-encoded to WebP: none, all, or — "auto" — only
 	// those that would otherwise be lossless. See WebPMode.
 	WebP WebPMode `json:"webp"`
+	// AlphaThreshold is how much of an image may be visibly transparent while it
+	// still counts as opaque when its format is decided from the image — for a
+	// source without an extension. A share of the pixels, 0 to 1. Defaults to 0.
+	//
+	// A pixel at least 98% opaque is never counted: that is edge anti-aliasing a
+	// reader cannot see, and one of them used to be enough to send a photograph to
+	// a lossless format at several times its size. Raise this to also let a few
+	// genuinely transparent pixels go — 0.001 is a thousandth of the image — and
+	// keep it low: a photograph with rounded, transparent corners that is judged
+	// opaque becomes a JPEG with square ones.
+	AlphaThreshold float64 `json:"alphaThreshold"`
 	// Disabled turns the plugin off without removing it from the application.
 	Disabled bool `json:"disabled"`
 }
@@ -101,6 +112,9 @@ func (c Config) validate() error {
 	}
 	if c.Prefix == "/" {
 		return fmt.Errorf("opti-image: prefix must not be \"/\", which would claim the whole site")
+	}
+	if c.AlphaThreshold < 0 || c.AlphaThreshold >= 1 {
+		return fmt.Errorf("opti-image: alphaThreshold %v must be at least 0 and below 1", c.AlphaThreshold)
 	}
 	for _, origin := range c.AllowedOrigins {
 		if origin.Host == "" {
