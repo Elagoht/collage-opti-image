@@ -41,6 +41,7 @@ import (
 	"net/http"
 	"net/url"
 	"path"
+	"slices"
 	"strings"
 	"time"
 
@@ -65,8 +66,16 @@ type Plugin struct {
 func New() *Plugin { return &Plugin{} }
 
 // NewWith returns a plugin with cfg as its starting point, which the application's
-// own configuration is decoded over.
-func NewWith(cfg Config) *Plugin { return &Plugin{cfg: cfg} }
+// own configuration is decoded over: a key the JSON has replaces the field
+// entirely, and a key it lacks leaves cfg's value.
+//
+// The origins are copied, because encoding/json decodes an array into the slice it
+// finds, reusing its backing array — without the copy, the JSON's origins would be
+// written into the caller's slice.
+func NewWith(cfg Config) *Plugin {
+	cfg.AllowedOrigins = slices.Clone(cfg.AllowedOrigins)
+	return &Plugin{cfg: cfg}
+}
 
 func (p *Plugin) Name() string    { return Name }
 func (p *Plugin) Version() string { return "1.0.0" }

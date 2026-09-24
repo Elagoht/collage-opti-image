@@ -102,12 +102,24 @@ func newSite(t *testing.T, cfg optiimage.Config, bodyHTML string) http.Handler {
 // is what a test calling Purge needs.
 func newSiteWith(t *testing.T, plug *optiimage.Plugin, bodyHTML string) http.Handler {
 	t.Helper()
+	return newSiteConfigured(t, plug, nil, bodyHTML)
+}
 
+// newSiteConfigured also hands the application a plugin configuration, the way a
+// configuration file would.
+func newSiteConfigured(t *testing.T, plug *optiimage.Plugin, pluginConfig json.RawMessage, bodyHTML string) http.Handler {
+	t.Helper()
+
+	var plugins map[string]json.RawMessage
+	if pluginConfig != nil {
+		plugins = map[string]json.RawMessage{optiimage.Name: pluginConfig}
+	}
 	app, err := collage.New(&collage.Config{
-		Logger:   slog.New(slog.NewTextHandler(io.Discard, nil)),
-		Template: collage.TemplateConfig{FS: templates, Extension: ".html"},
-		Plugins:  []collage.Plugin{plug},
-		Cache:    collage.CacheConfig{Enabled: true, Type: "memory", MaxEntries: 64},
+		Logger:       slog.New(slog.NewTextHandler(io.Discard, nil)),
+		Template:     collage.TemplateConfig{FS: templates, Extension: ".html"},
+		Plugins:      []collage.Plugin{plug},
+		PluginConfig: plugins,
+		Cache:        collage.CacheConfig{Enabled: true, Type: "memory", MaxEntries: 64},
 	})
 	if err != nil {
 		t.Fatalf("New: %v", err)
@@ -471,5 +483,23 @@ func TestPlugin_OneSourceCanBePurgedAlone(t *testing.T) {
 	get(t, site, first)
 	if o.hits.Load() == cached {
 		t.Error("the purged source was still served from the store")
+	}
+}
+
+// Decoding over NewWith's value must not write into the caller's slice.
+// encoding/json reuses a slice's backing array, so without a copy the JSON's
+// origins overwrote the ones the caller still held.
+func TestNewWith_DoesNotWriteIntoTheCallersOrigins(t *testing.T) {
+	_, srv := newOrigin(t, 40, 30)
+	mine := []optiimage.Origin{
+		{Scheme: "https", Host: "mine.example"},
+		{Scheme: "https", Host: "also-mine.example"},
+	}
+	newSiteConfigured(t,
+		optiimage.NewWith(optiimage.Config{AllowedOrigins: mine, CacheDir: t.TempDir()}),
+		mustJSON(t, map[string][]optiimage.Origin{"allowedOrigins": allow(srv)}), `<p></p>`)
+
+	if mine[0].Host != "mine.example" {
+		t.Errorf("the caller's origins were overwritten: %v", mine)
 	}
 }
