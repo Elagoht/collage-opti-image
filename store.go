@@ -3,11 +3,13 @@ package optiimage
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io/fs"
 	"path"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 )
@@ -38,6 +40,73 @@ func (r recipe) name() string {
 		strconv.Itoa(r.Width) + "x" + strconv.Itoa(r.Height) + "|" + r.Format.name))
 	return hex.EncodeToString(sum[:16]) + r.Format.ext
 }
+
+// nameHexLen is the length of a name's hash part: sixteen bytes, hex-encoded.
+const nameHexLen = 32
+
+// validName reports whether name has the shape of one recipe.name mints.
+//
+// Checked before anything is looked up, because the cache directory holds more than
+// images — recipes, and the temporary files a write goes through — and a request is
+// a filename a caller chose. Without it "<name>.json" would serve a recipe, source
+// URL and all, as if it were a picture.
+func validName(name string) bool {
+	ext := path.Ext(name)
+	if _, known := formatsByExt[ext]; !known {
+		return false
+	}
+	stem := strings.TrimSuffix(name, ext)
+	if len(stem) != nameHexLen {
+		return false
+	}
+	for i := range len(stem) {
+		c := stem[i]
+		if (c < '0' || c > '9') && (c < 'a' || c > 'f') {
+			return false
+		}
+	}
+	return true
+}
+
+// persistedRecipe is a recipe as it is written beside the image it produces.
+type persistedRecipe struct {
+	Source string `json:"source"`
+	Width  int    `json:"width"`
+	Height int    `json:"height"`
+	Format string `json:"format"`
+}
+
+func (r recipe) marshal() ([]byte, error) {
+	return json.Marshal(persistedRecipe{
+		Source: r.Source, Width: r.Width, Height: r.Height, Format: r.Format.name,
+	})
+}
+
+// unmarshalRecipe reads a persisted recipe back, and accepts it only as the recipe
+// for name.
+//
+// The check that it hashes to name is what makes the file mean what its name says.
+// The name is the recipe's content, so a file that describes something else — a
+// stale one, a truncated one, one copied under the wrong name, one planted — is not
+// a recipe this plugin wrote for that name, whatever it contains. It costs one hash.
+func unmarshalRecipe(name string, data []byte) (recipe, bool) {
+	var p persistedRecipe
+	if err := json.Unmarshal(data, &p); err != nil {
+		return recipe{}, false
+	}
+	format, known := formatsByName[p.Format]
+	if !known || p.Width <= 0 || p.Height <= 0 {
+		return recipe{}, false
+	}
+	r := recipe{Source: p.Source, Width: p.Width, Height: p.Height, Format: format}
+	if r.name() != name {
+		return recipe{}, false
+	}
+	return r, true
+}
+
+// recipeFile is the file a name's recipe is kept in, beside the image.
+func recipeFile(name string) string { return name + ".json" }
 
 // store holds the recipes the rewriter minted and the bytes they produced.
 //
@@ -75,20 +144,61 @@ func newStore(maxBytes int64, d *disk) *store {
 }
 
 // record remembers a recipe and returns its name.
+//
+// It is written to disk as well, the first time this process sees it. The page that
+// links the name may outlive the process — the framework's disk cache keeps rendered
+// HTML across restarts — and a name whose recipe lived only in memory was a 404
+// after one, for every image nobody had happened to request before it.
 func (s *store) record(r recipe) string {
 	name := r.name()
 	s.mu.Lock()
+	_, known := s.recipes[name]
 	s.recipes[name] = r
 	s.mu.Unlock()
+
+	if !known && s.disk != nil {
+		if data, err := r.marshal(); err == nil {
+			// Not worth failing a render over: the recipe is in memory, and the
+			// only cost is the case this exists for.
+			_ = s.disk.write(recipeFile(name), data)
+		}
+	}
 	return name
 }
 
-// lookup returns the recipe a name stands for.
+// lookup returns the recipe a name stands for, from memory or from disk.
+//
+// Disk is the recipe an earlier process recorded for a page that is still being
+// served. It is promoted into memory, so it is read once, and so a purge reaches it.
 func (s *store) lookup(name string) (recipe, bool) {
 	s.mu.RLock()
-	defer s.mu.RUnlock()
 	r, ok := s.recipes[name]
-	return r, ok
+	s.mu.RUnlock()
+	if ok {
+		return r, true
+	}
+
+	r, ok = s.persisted(name)
+	if !ok {
+		return recipe{}, false
+	}
+	s.mu.Lock()
+	s.recipes[name] = r
+	s.mu.Unlock()
+	return r, true
+}
+
+// persisted reads the recipe an earlier process wrote for name. It takes no lock:
+// it touches only the disk.
+func (s *store) persisted(name string) (recipe, bool) {
+	if s.disk == nil {
+		return recipe{}, false
+	}
+	data, ok := s.disk.read(recipeFile(name))
+	if !ok {
+		return recipe{}, false
+	}
+	return unmarshalRecipe(name, data)
 }
 
 // names returns every recorded name, which is what a static build walks.
@@ -164,10 +274,23 @@ func (s *store) remember(name string, body []byte) {
 
 // forget drops produced bytes. An empty source drops all of them.
 //
-// The recipes survive deliberately: a page already rendered links these names, and
-// forgetting what a name means would turn every one of those links into a 404
-// rather than into a re-fetch.
+// The recipes survive deliberately, in memory and on disk: a page already rendered
+// links these names, and forgetting what a name means would turn every one of those
+// links into a 404 rather than into a re-fetch.
 func (s *store) forget(source string) {
+	// Read before the lock: persisted touches only the disk, and the recipes an
+	// earlier process wrote are how a purge reaches an image on disk under a name
+	// this process has not minted yet. Without them a wrong image survives the
+	// purge that was meant to remove it.
+	onDisk := make(map[string]recipe)
+	if s.disk != nil {
+		for _, name := range s.disk.recipeNames() {
+			if r, ok := s.persisted(name); ok {
+				onDisk[name] = r
+			}
+		}
+	}
+
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -175,15 +298,20 @@ func (s *store) forget(source string) {
 		for name := range s.bodies {
 			s.removeFromDisk(name)
 		}
-		// Recipes, not bodies: an image produced by an earlier process is on disk
-		// under a name this one may not have minted yet, and purging has to reach
-		// it or a wrong image survives the purge that was meant to remove it.
 		for name := range s.recipes {
+			s.removeFromDisk(name)
+		}
+		for name := range onDisk {
 			s.removeFromDisk(name)
 		}
 		s.bodies = make(map[string][]byte)
 		s.bytes = 0
 		return
+	}
+	for name, r := range onDisk {
+		if _, known := s.recipes[name]; !known {
+			s.recipes[name] = r
+		}
 	}
 	for name, r := range s.recipes {
 		if r.Source != source {
@@ -227,9 +355,12 @@ var (
 //
 // The access control is that a name with no recipe produces nothing: the request
 // carries a filename rather than a URL to fetch, so there is nothing for a caller to
-// point somewhere else. A forged name resolves to no recipe, and a zero recipe has
-// an empty source that the allowlist refuses — so the refusal holds with or without
-// the explicit check below.
+// point somewhere else. A recipe is one this plugin recorded — in this process, or
+// written by an earlier one beside the image and accepted only if it hashes to the
+// name it is stored under. A forged name resolves to no recipe, and a zero recipe
+// has an empty source that the allowlist refuses — so the refusal holds with or
+// without the explicit check below. The allowlist is checked again when producing,
+// so a recipe on disk cannot outlive the permission it was recorded under.
 //
 // The explicit fs.ErrNotExist is for the filesystem contract rather than for the
 // response: a correct fs.FS says a missing file is missing, and a caller walking
@@ -241,6 +372,9 @@ func (f *imageFS) Open(name string) (fs.File, error) {
 	name = path.Clean(name)
 	if name == "." {
 		return &imageDir{fs: f}, nil
+	}
+	if !validName(name) {
+		return nil, &fs.PathError{Op: "open", Path: name, Err: fs.ErrNotExist}
 	}
 
 	// Disk first, and deliberately before the recipe.

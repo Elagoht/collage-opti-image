@@ -90,10 +90,27 @@ nothing: `Open` looks it up, finds no recipe, and returns `fs.ErrNotExist`. Ther
 no signature because there is nothing to forge, and nothing to enumerate: a caller
 cannot ask for a 9999×9999 resize because they cannot name one.
 
-The recipes live in the process that rewrote the page. A fleet of servers behind a
-shared page cache would hand one process's URLs to another, which would not know them
-— so a multi-process deployment wants the pages built statically, or a shared store,
-which this does not yet have.
+The recipes live in the process that rewrote the page, and are written beside the
+images as `<name>.json` so they outlive it. collage's disk cache keeps rendered pages
+across a restart; without the recipe on disk, a cached page's image that nobody had
+requested yet was a 404 until the page was rendered again.
+
+That does not reopen what the names closed. The names are a plain hash rather than
+an HMAC on purpose: nothing rests on a name being hard to compute, only on a name
+resolving to a recipe this plugin recorded. A recipe read back from disk is accepted
+only if it hashes to the name it is stored under, and the allowlist is checked again
+before anything is fetched, so narrowing it takes effect on recipes written under a
+wider one. Only names of the shape the plugin mints are looked up at all, so a
+request cannot reach a recipe file, or a temporary one, as if it were an image.
+
+A key would add nothing here. The cache directory is already trusted — the plugin
+serves the image bytes in it without checking them — so whoever can write a recipe
+there can write the image instead, and a key kept beside them would be no secret.
+
+A fleet of servers behind a shared page cache would hand one process's URLs to
+another: they know each other's names when they share `cacheDir`, and not otherwise
+— so a multi-process deployment wants a shared cache directory or the pages built
+statically.
 
 ## Static builds
 
@@ -217,7 +234,8 @@ p.Purge()                  // every produced image
 p.PurgeSource(imageURL)    // one origin image, at every size
 ```
 
-Both drop the produced bytes, remove the files, and keep the recipes. A page already rendered links
+Both drop the produced bytes, remove the image files — an earlier process's too,
+found through the recipes it left — and keep the recipes. A page already rendered links
 these names, and forgetting what a name means would turn every one of those links
 into a 404 rather than into a re-fetch.
 

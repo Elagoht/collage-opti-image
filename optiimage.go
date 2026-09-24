@@ -160,6 +160,20 @@ var (
 	formatWebP = outputFormat{name: "webp", ext: ".webp"}
 )
 
+// formatsByName reads a persisted recipe's format back, and formatsByExt says which
+// extensions a name can carry. Every format is in both.
+var (
+	formatsByName = map[string]outputFormat{}
+	formatsByExt  = map[string]outputFormat{}
+)
+
+func init() {
+	for _, f := range []outputFormat{formatJPEG, formatPNG, formatWebP} {
+		formatsByName[f.name] = f
+		formatsByExt[f.ext] = f
+	}
+}
+
 // formatFor picks the output format for a source URL.
 //
 // From the source's extension, because that is the only thing known at rewrite
@@ -211,9 +225,10 @@ func (p *Plugin) fetchContext() context.Context {
 func (p *Plugin) produce(ctx context.Context, r recipe) ([]byte, error) {
 	source, allowed := p.cfg.allows(r.Source)
 	if !allowed {
-		// Re-checked even though the signature proves this plugin issued the URL:
-		// the allowlist may have been narrowed since, and a signed URL must not
-		// outlive the permission it was issued under.
+		// Re-checked even though a recipe exists only because this plugin recorded
+		// it: the allowlist may have been narrowed since — a recipe read back from
+		// disk may have been recorded by a process with a wider one — and a name
+		// must not outlive the permission it was minted under.
 		return nil, fmt.Errorf("opti-image: %q is not an allowed origin", r.Source)
 	}
 

@@ -3,6 +3,7 @@ package optiimage
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 )
 
@@ -96,6 +97,25 @@ func (d *disk) write(name string, body []byte) error {
 		return err
 	}
 	return nil
+}
+
+// recipeNames lists the names whose recipes are stored, so a purge can reach images
+// an earlier process produced.
+func (d *disk) recipeNames() []string {
+	if !d.ready() {
+		return nil
+	}
+	entries, err := os.ReadDir(d.dir)
+	if err != nil {
+		return nil
+	}
+	var names []string
+	for _, e := range entries {
+		if name, ok := strings.CutSuffix(e.Name(), ".json"); ok && !e.IsDir() {
+			names = append(names, name)
+		}
+	}
+	return names
 }
 
 // remove deletes a stored image, if it is there.
