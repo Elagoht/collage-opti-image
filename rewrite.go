@@ -2,6 +2,7 @@ package optiimage
 
 import (
 	"bytes"
+	"html"
 	"strconv"
 	"strings"
 )
@@ -44,10 +45,15 @@ func (p *Plugin) rewriteImages(html []byte) []byte {
 
 // rewriteTag returns tag with its src replaced, or tag unchanged.
 func (p *Plugin) rewriteTag(tag []byte) []byte {
-	src, srcStart, srcEnd, ok := attribute(tag, "src")
+	raw, srcStart, srcEnd, ok := attribute(tag, "src")
 	if !ok {
 		return tag
 	}
+	// An attribute value is HTML, not a URL: html/template writes a "+" in one as
+	// "&#43;", and a CMS path with a "+" or a query with an "&" arrives encoded.
+	// Taken verbatim, "&#43;" reaches the origin as "&" followed by a fragment, and
+	// the image is a 404 at a URL nobody wrote.
+	src := html.UnescapeString(raw)
 	width, okW := intAttribute(tag, "width")
 	height, okH := intAttribute(tag, "height")
 	if !okW || !okH || width <= 0 || height <= 0 {
@@ -66,7 +72,10 @@ func (p *Plugin) rewriteTag(tag []byte) []byte {
 		Height: height,
 		Format: p.formatFor(src),
 	})
-	replacement := p.cfg.Prefix + name
+	// Escaped on the way back for the same reason it was decoded on the way in. The
+	// name is hex, but the prefix is configuration, and a quote in it would end the
+	// attribute.
+	replacement := html.EscapeString(p.cfg.Prefix + name)
 
 	out := make([]byte, 0, len(tag)+len(replacement))
 	out = append(out, tag[:srcStart]...)

@@ -53,6 +53,12 @@ That is the contract, not a simplification:
 `data-src` is left alone too — it contains `src=`, and rewriting it would break the
 lazy-loading script the page uses while leaving the real source untouched.
 
+The `src` is read as what it is — an HTML attribute value — and decoded before it is
+treated as a URL. `html/template` writes a `+` in an attribute as `&#43;`, so a path
+such as `/covers/python-examples+1746296252694` arrives encoded; taken verbatim, the
+origin would be asked for `&` followed by a fragment. The rewritten value is escaped
+on the way back.
+
 ## Nothing is fetched during the render
 
 The render only rewrites the `src` and records what that name means. The fetch, the

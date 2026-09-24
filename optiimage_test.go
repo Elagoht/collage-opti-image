@@ -14,6 +14,7 @@ import (
 	"net/url"
 	"regexp"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"testing/fstest"
@@ -24,10 +25,20 @@ import (
 )
 
 // origin serves one PNG and counts requests, so a test can tell a fetch from a
-// cache hit.
+// cache hit. It records the paths it was asked for, so a test can tell which URL
+// was fetched and not only that one was.
 type origin struct {
 	hits atomic.Int64
 	body []byte
+
+	mu    sync.Mutex
+	paths []string
+}
+
+func (o *origin) requested() []string {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	return append([]string(nil), o.paths...)
 }
 
 func newOrigin(t *testing.T, w, h int) (*origin, *httptest.Server) {
@@ -49,6 +60,9 @@ func newOrigin(t *testing.T, w, h int) (*origin, *httptest.Server) {
 	o := &origin{body: buf.Bytes()}
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		o.hits.Add(1)
+		o.mu.Lock()
+		o.paths = append(o.paths, r.URL.Path)
+		o.mu.Unlock()
 		if r.URL.Path == "/missing.png" {
 			http.Error(w, "nope", http.StatusNotFound)
 			return
@@ -164,6 +178,39 @@ func TestPlugin_RewritesAndServesADeclaredSizeImage(t *testing.T) {
 	}
 	if got := decoded.Bounds().Size(); got.X != 200 || got.Y != 150 {
 		t.Errorf("served image is %v, want 200x150", got)
+	}
+}
+
+// html/template writes a "+" inside an attribute as "&#43;". The attribute value is
+// HTML, so the URL it holds is the decoded one: taken verbatim, "&#43;" reaches the
+// origin as "&" and a fragment, and a CMS cover whose path has a "+" is a 404.
+func TestPlugin_DecodesTheSrcBeforeFetchingIt(t *testing.T) {
+	o, srv := newOrigin(t, 400, 300)
+	site := newSite(t, optiimage.Config{AllowedOrigins: allow(srv)},
+		`<img src="`+srv.URL+`/a&#43;b.jpg" width="200" height="150">`)
+
+	src := srcOf(t, get(t, site, "/gallery").Body.String())
+	if rec := get(t, site, src); rec.Code != http.StatusOK {
+		t.Fatalf("GET %s = %d", src, rec.Code)
+	}
+	if got := o.requested(); len(got) != 1 || got[0] != "/a+b.jpg" {
+		t.Errorf("the origin was asked for %q, want [/a+b.jpg]", got)
+	}
+}
+
+// What is written back is escaped, so a prefix the configuration chose cannot end
+// the attribute it is written into.
+func TestPlugin_EscapesTheRewrittenSrc(t *testing.T) {
+	_, srv := newOrigin(t, 400, 300)
+	site := newSite(t, optiimage.Config{AllowedOrigins: allow(srv), Prefix: `/img&"x/`},
+		`<img src="`+srv.URL+`/a.png" width="200" height="150" alt="kept">`)
+
+	body := get(t, site, "/gallery").Body.String()
+	if !strings.Contains(body, `src="/img&amp;&#34;x/`) {
+		t.Errorf("the rewritten src is not escaped:\n%s", body)
+	}
+	if !strings.Contains(body, `alt="kept"`) {
+		t.Errorf("the tag was corrupted:\n%s", body)
 	}
 }
 
