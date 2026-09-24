@@ -71,8 +71,16 @@ var templates = fstest.MapFS{
 }
 
 // newSite builds a site whose one page renders bodyHTML verbatim.
+//
+// The cache directory is the test's own unless the test names one. The default is
+// .cache/opti-image in the working directory, which for a test is the checkout: one
+// run's images would be the next run's disk hits, and a test counting origin
+// fetches would be counting what an earlier run left behind.
 func newSite(t *testing.T, cfg optiimage.Config, bodyHTML string) http.Handler {
 	t.Helper()
+	if cfg.CacheDir == "" {
+		cfg.CacheDir = t.TempDir()
+	}
 	return newSiteWith(t, optiimage.NewWith(cfg), bodyHTML)
 }
 
@@ -368,7 +376,7 @@ func mustJSON(t *testing.T, v any) json.RawMessage { // any: restates encoding/j
 // the process, and these are cached for a year.
 func TestPlugin_ProducedImagesCanBePurged(t *testing.T) {
 	o, srv := newOrigin(t, 400, 300)
-	p := optiimage.NewWith(optiimage.Config{AllowedOrigins: allow(srv)})
+	p := optiimage.NewWith(optiimage.Config{AllowedOrigins: allow(srv), CacheDir: t.TempDir()})
 	site := newSiteWith(t, p, `<img src="`+srv.URL+`/a.png" width="200" height="150">`)
 
 	src := srcOf(t, get(t, site, "/gallery").Body.String())
@@ -393,7 +401,7 @@ func TestPlugin_ProducedImagesCanBePurged(t *testing.T) {
 
 func TestPlugin_OneSourceCanBePurgedAlone(t *testing.T) {
 	o, srv := newOrigin(t, 400, 300)
-	p := optiimage.NewWith(optiimage.Config{AllowedOrigins: allow(srv)})
+	p := optiimage.NewWith(optiimage.Config{AllowedOrigins: allow(srv), CacheDir: t.TempDir()})
 	site := newSiteWith(t, p,
 		`<img src="`+srv.URL+`/a.png" width="200" height="150">`+
 			`<img src="`+srv.URL+`/b.png" width="200" height="150">`)

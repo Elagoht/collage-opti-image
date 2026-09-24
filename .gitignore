@@ -1,3 +1,6 @@
 # Build output
 *.test
 *.out
+
+# What the plugin produces when run from the checkout
+.cache/
