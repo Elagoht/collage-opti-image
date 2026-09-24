@@ -36,9 +36,10 @@ func init() { RegisterWebPEncoder(nativeWebP{}) }
 //	photographic          PNG 976,984  JPEG q82 231,548   WebP 977,166
 //
 // So: five times smaller than JPEG on the first, four times larger on the second. A
-// lossless codec cannot beat a lossy one on a photograph and does not try. Turn WebP
-// on for a site whose images are illustrations, diagrams or interface captures;
-// leave it off for one whose images are photographs.
+// lossless codec cannot beat a lossy one on a photograph and does not try. That is
+// what WebPAuto is for: WebP where it replaces a PNG, JPEG where it would replace
+// one. WebPOn suits a site whose images are all illustrations, diagrams or
+// interface captures.
 //
 // The advantage is also size-dependent, which is easy to miss when checking on a
 // small fixture. At 200x150 the same gradient encodes to 492 bytes as PNG and 510

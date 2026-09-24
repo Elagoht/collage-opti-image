@@ -12,21 +12,12 @@ var errNoWebPEncoder = errors.New("opti-image: no WebP encoder is linked")
 
 // WebPEncoder encodes an image as WebP.
 //
-// It is an interface the application supplies rather than something this package
-// implements, because the standard library has no WebP encoder and every working
-// one needs cgo. A plugin that cannot be built without a C toolchain is a plugin
-// most people cannot use, so the default build has none and re-encodes to the
-// source format instead.
+// A pure-Go lossless encoder is linked unconditionally and registered at init — see
+// webp_encoder.go — so no build tag and no cgo are needed for WebP. The interface
+// exists so it can be replaced: an application wanting the lossy modes registers a
+// cgo binding to libwebp instead.
 //
-// To get WebP, build with -tags webp and register an encoder:
-//
-//	//go:build webp
 //	func init() { optiimage.RegisterWebPEncoder(myCgoEncoder{}) }
-//
-// The build tag is what makes the dependency opt-in; RegisterWebPEncoder is what
-// makes it replaceable. Both are needed: the tag alone would still require this
-// package to import something, and the registration alone would leave a binary
-// carrying a cgo dependency nobody asked for.
 type WebPEncoder interface {
 	// EncodeWebP writes img to w at the given quality, 1..100.
 	EncodeWebP(w io.Writer, img image.Image, quality int) error
@@ -35,9 +26,9 @@ type WebPEncoder interface {
 // webpEncoder is what RegisterWebPEncoder set, or nil.
 var webpEncoder WebPEncoder
 
-// RegisterWebPEncoder installs the encoder used when Config.WebP is on. It is
-// intended for an init function in a build-tagged file, and is not safe to call
-// once an application is serving.
+// RegisterWebPEncoder installs the encoder used when Config.WebP asks for WebP,
+// replacing the bundled one. It is intended for an init function, and is not safe
+// to call once an application is serving.
 func RegisterWebPEncoder(enc WebPEncoder) { webpEncoder = enc }
 
 // encodeWebP encodes img, or reports that nothing can.

@@ -12,8 +12,8 @@
 // # What it does, and when
 //
 // The rewrite happens during the render: an <img> with width, height and a src on
-// an allowed origin has its src replaced with a signed URL under the plugin's own
-// prefix. Nothing is fetched at that point.
+// an allowed origin has its src replaced with a content-addressed name under the
+// plugin's own prefix. Nothing is fetched at that point.
 //
 // The fetch, the decode and the resize happen on the first request for that URL.
 // Doing them during the render would make the first view of a page as slow as its
@@ -21,14 +21,12 @@
 // Doing them at the image endpoint means the page arrives at once and the images
 // arrive as the browser asks for them, which is also the order the browser wants.
 //
-// # Why the URLs are signed
+// # Why the URLs are not signed
 //
-// The image endpoint takes a URL from the request and fetches it. Unsigned, that is
-// a server-side request forgery primitive reachable by anyone who can read the
-// page's HTML and edit a query string. The allowlist is checked again at fetch
-// time, so the signature is not the only defence — it is the one that stops an
-// attacker probing the allowlist at all, and stops the cache becoming unbounded
-// storage keyed on strings they choose.
+// The request carries no source URL, only a name, and a name stands for a recipe
+// this plugin recorded or for nothing. There is nothing to forge, so nothing is
+// signed; the allowlist is checked again at fetch time all the same, so a recipe
+// cannot outlive the permission it was recorded under. See recipe.name.
 package optiimage
 
 import (
@@ -73,8 +71,8 @@ func NewWith(cfg Config) *Plugin { return &Plugin{cfg: cfg} }
 func (p *Plugin) Name() string    { return Name }
 func (p *Plugin) Version() string { return "1.0.0" }
 
-// Configure decodes the configuration and prepares the signer and the cache. It
-// does not register the route: that needs Host, which Init receives.
+// Configure decodes the configuration and prepares the store. It does not mount the
+// images: that needs Host, which Init receives.
 func (p *Plugin) Configure(_ context.Context, host collage.ConfigHost) error {
 	p.log = host.Logger()
 	if err := host.Config(&p.cfg); err != nil {
@@ -147,7 +145,6 @@ func (p *Plugin) Init(_ context.Context, host collage.Host) error {
 		collage.WithCacheControl("public, max-age=31536000, immutable"))
 }
 
-// outputFormat is one format the plugin can serve.
 // outputFormat is one format the plugin can serve. The extension is what the mount
 // derives a Content-Type from — a mounted file's type comes from its name, which is
 // one fewer thing to keep in step than declaring it separately.
