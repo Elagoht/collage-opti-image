@@ -317,3 +317,10 @@ into a 404 rather than into a re-fetch.
 The case it exists for is an origin that served a wrong file. The names are
 content-addressed and cached for a year, so without this the only fix would be
 restarting the process.
+
+## Changes
+
+### v0.2.2
+
+- Requires collage v0.24.0. Nothing else changes: collage now redirects a path
+  with dot segments before it reaches `/_image/`, which the tests account for.

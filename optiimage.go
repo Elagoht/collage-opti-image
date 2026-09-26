@@ -79,7 +79,7 @@ func NewWith(cfg Config) *Plugin {
 }
 
 func (p *Plugin) Name() string    { return Name }
-func (p *Plugin) Version() string { return "0.2.1" }
+func (p *Plugin) Version() string { return "0.2.2" }
 
 // Configure decodes the configuration and prepares the store. It does not mount the
 // images: that needs Host, which Init receives.

@@ -377,9 +377,13 @@ func TestPlugin_AnInventedNameIsNotFound(t *testing.T) {
 	site := newSite(t, optiimage.Config{AllowedOrigins: allow(srv)},
 		`<img src="`+srv.URL+`/a.png" width="20" height="10">`)
 
+	// collage v0.24.0 redirects a path with dot segments to its clean spelling
+	// before anything reads it, so a traversal never reaches the mount.
+	if rec := get(t, site, "/_image/../../etc/passwd"); rec.Code != http.StatusMovedPermanently || rec.Header().Get("Location") != "/etc/passwd" {
+		t.Errorf("GET /_image/../../etc/passwd = %d %q, want collage's redirect to /etc/passwd", rec.Code, rec.Header().Get("Location"))
+	}
 	for _, invented := range []string{
 		"/_image/deadbeefdeadbeefdeadbeefdeadbeef.png",
-		"/_image/../../etc/passwd",
 		"/_image/",
 	} {
 		// A mount answers 404 for any Open failure, so this pins the outcome
