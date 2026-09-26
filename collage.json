@@ -1,0 +1,76 @@
+{
+  "$schema": "https://raw.githubusercontent.com/Elagoht/collage-snippets-highlighter/main/schemas/collage-plugin-manifest.schema.json",
+  "name": "elagoht/opti-image",
+  "description": "A collage plugin that rewrites images declaring a width and a height to resized copies it serves itself.",
+  "repository": "https://github.com/Elagoht/collage-opti-image",
+  "config": {
+    "type": "object",
+    "description": "A collage plugin that rewrites images declaring a width and a height to resized copies it serves itself.",
+    "properties": {
+      "allowedOrigins": {
+        "type": "array",
+        "description": "AllowedOrigins is the set of hosts images may be fetched from. An empty list disables the plugin entirely rather than allowing everything: a fetcher that defaults to \"any host\" is an SSRF primitive wearing a feature's name.",
+        "items": {
+          "type": "object",
+          "properties": {
+            "host": {
+              "type": "string"
+            },
+            "scheme": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "alphaThreshold": {
+        "type": "number",
+        "description": "AlphaThreshold is how much of an image may be visibly transparent while it still counts as opaque when its format is decided from the image — for a source without an extension. A share of the pixels, 0 to 1. Defaults to 0. A pixel at least 98% opaque is never counted: that is edge anti-aliasing a reader cannot see, and one of them used to be enough to send a photograph to a lossless format at several times its size. Raise this to also let a few genuinely transparent pixels go — 0.001 is a thousandth of the image — and keep it low: a photograph with rounded, transparent corners that is judged opaque becomes a JPEG with square ones."
+      },
+      "cacheBytes": {
+        "type": "integer",
+        "description": "CacheBytes caps the memory held by resized images. Defaults to 64 MiB."
+      },
+      "cacheDir": {
+        "type": "string",
+        "description": "CacheDir is where produced images are kept between restarts. An empty value means \".cache/opti-image\", relative to the working directory. A dotted directory in the project, the way a build tool does it — findable, one line in .gitignore, and gone when you delete it. The temporary directory would keep it out of sight, which is the problem rather than the point: on macOS that is /var/folders/xy/…/T, and a cache nobody can find is a cache nobody can clear."
+      },
+      "disabled": {
+        "type": "boolean",
+        "description": "Disabled turns the plugin off without removing it from the application."
+      },
+      "fetchTimeout": {
+        "type": "string",
+        "description": "FetchTimeout bounds a single origin fetch. Defaults to 10s. In JSON it is written the way a person writes a duration — \"10s\", \"500ms\" — as well as as a number of nanoseconds. See Duration.",
+        "pattern": "^(\\d+(\\.\\d+)?(ns|us|µs|ms|s|m|h))+$",
+        "examples": [
+          "30s",
+          "5m"
+        ]
+      },
+      "maxPixels": {
+        "type": "integer",
+        "description": "MaxPixels refuses an origin image with more pixels than this, before it is decoded. Defaults to 40 million. A small file can decode to an enormous bitmap — the decompression bomb — and the byte limit above does not see it."
+      },
+      "maxSourceBytes": {
+        "type": "integer",
+        "description": "MaxSourceBytes refuses an origin image larger than this. Defaults to 8 MiB. Without it, one hostile or careless origin can exhaust the process's memory."
+      },
+      "noDiskCache": {
+        "type": "boolean",
+        "description": "NoDiskCache keeps produced images in memory only, so nothing is written anywhere. A read-only deployment does not need this — a directory that cannot be created or written to disables the disk cache by itself, with one line in the log — but a deployment that would rather not write at all can say so."
+      },
+      "prefix": {
+        "type": "string",
+        "description": "Prefix is the URL prefix optimised images are served under. It must begin and end with \"/\". Defaults to \"/_image/\"."
+      },
+      "quality": {
+        "type": "integer",
+        "description": "Quality is the JPEG quality of re-encoded images, 1..100. Defaults to 82."
+      },
+      "webp": {
+        "type": "integer",
+        "description": "WebP says which images are re-encoded to WebP: none, all, or — \"auto\" — only those that would otherwise be lossless. See WebPMode."
+      }
+    }
+  }
+}

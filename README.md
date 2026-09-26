@@ -320,6 +320,12 @@ restarting the process.
 
 ## Changes
 
+### v0.2.3
+
+- `collage.json`: the plugin described to editors — its template functions,
+  snippets and configuration schema — for the Collage Snippets & Highlighter
+  extension and any tool reading it.
+
 ### v0.2.2
 
 - Requires collage v0.24.0. Nothing else changes: collage now redirects a path
