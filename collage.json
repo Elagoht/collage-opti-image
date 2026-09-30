@@ -19,7 +19,8 @@
             "scheme": {
               "type": "string"
             }
-          }
+          },
+          "additionalProperties": false
         }
       },
       "alphaThreshold": {
@@ -39,12 +40,20 @@
         "description": "Disabled turns the plugin off without removing it from the application."
       },
       "fetchTimeout": {
-        "type": "string",
         "description": "FetchTimeout bounds a single origin fetch. Defaults to 10s. In JSON it is written the way a person writes a duration — \"10s\", \"500ms\" — as well as as a number of nanoseconds. See Duration.",
-        "pattern": "^(\\d+(\\.\\d+)?(ns|us|µs|ms|s|m|h))+$",
-        "examples": [
-          "30s",
-          "5m"
+        "anyOf": [
+          {
+            "type": "string",
+            "pattern": "^(\\d+(\\.\\d+)?(ns|us|µs|ms|s|m|h))+$",
+            "examples": [
+              "30s",
+              "5m"
+            ]
+          },
+          {
+            "type": "integer",
+            "description": "nanoseconds"
+          }
         ]
       },
       "maxPixels": {
@@ -68,9 +77,20 @@
         "description": "Quality is the JPEG quality of re-encoded images, 1..100. Defaults to 82."
       },
       "webp": {
-        "type": "integer",
-        "description": "WebP says which images are re-encoded to WebP: none, all, or — \"auto\" — only those that would otherwise be lossless. See WebPMode."
+        "description": "WebP says which images are re-encoded to WebP: none, all, or — \"auto\" — only those that would otherwise be lossless. See WebPMode.",
+        "anyOf": [
+          {
+            "type": "boolean"
+          },
+          {
+            "type": "string",
+            "enum": [
+              "auto"
+            ]
+          }
+        ]
       }
-    }
+    },
+    "additionalProperties": false
   }
 }
