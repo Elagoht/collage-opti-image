@@ -2,7 +2,9 @@ package optiimage
 
 import (
 	"encoding/json"
+	"io/fs"
 	"testing"
+	"testing/fstest"
 	"time"
 )
 
@@ -99,5 +101,18 @@ func TestWebPMode_RefusesNonsense(t *testing.T) {
 		if err := json.Unmarshal([]byte(in), &m); err == nil {
 			t.Errorf("Unmarshal(%s) = nil error, want a refusal", in)
 		}
+	}
+}
+
+// A Files prefix is a path: it begins and ends with "/".
+func TestConfig_RefusesAFilesPrefixThatIsNoPath(t *testing.T) {
+	for _, prefix := range []string{"static/", "/static", "//static/"} {
+		cfg := Config{Files: map[string]fs.FS{prefix: fstest.MapFS{}}}.withDefaults()
+		if err := cfg.validate(); err == nil {
+			t.Errorf("prefix %q was accepted", prefix)
+		}
+	}
+	if err := (Config{Files: map[string]fs.FS{"/static/": fstest.MapFS{}}}).withDefaults().validate(); err != nil {
+		t.Errorf("/static/ was refused: %v", err)
 	}
 }

@@ -8,7 +8,7 @@ import (
 )
 
 // rewriteImages replaces the src of every <img> that declares both width and height
-// and points at an allowed origin.
+// and points at an allowed origin or a path under Config.Files.
 //
 // Only declared-size images are touched, and that is the contract rather than a
 // simplification. The declared size is the one piece of information that says how
@@ -60,8 +60,20 @@ func (p *Plugin) rewriteTag(tag []byte) []byte {
 		return tag
 	}
 	source, allowed := p.cfg.allows(src)
+	digest := ""
 	if !allowed {
-		return tag
+		fsys, file, parsed, ok := p.cfg.local(src)
+		if !ok {
+			return tag
+		}
+		d, err := p.digest(parsed.Path, fsys, file)
+		if err != nil {
+			// The page still shows the image, from where it was; only the
+			// optimisation is lost, and the reason is worth a line.
+			p.log.Warn("opti-image: a local image is left as it is", "src", src, "err", err)
+			return tag
+		}
+		source, digest = parsed, d
 	}
 
 	// Recorded before it is linked, which is the whole mechanism: the store is the
@@ -78,6 +90,7 @@ func (p *Plugin) rewriteTag(tag []byte) []byte {
 		Height: height,
 		Format: format,
 		Alpha:  alpha,
+		Digest: digest,
 	})
 	// Escaped on the way back for the same reason it was decoded on the way in. The
 	// name is hex, but the prefix is configuration, and a quote in it would end the

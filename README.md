@@ -54,12 +54,44 @@ optiimage.NewWith(optiimage.Config{
 })
 ```
 
-**An empty `allowedOrigins` disables the plugin.** It never means "any host". A
+**An empty `allowedOrigins` and no `Files` disable the plugin.** An empty list never means "any host". A
 fetcher that defaults to fetching anything is a server-side request forgery
 primitive wearing a feature's name.
 
 The scheme is part of an origin, not decoration: allowing a host without saying
 which scheme permits a plaintext fetch of an image the page serves over TLS.
+
+### The site's own images: `Files`
+
+An image the site serves itself needs no origin and no request to itself. `Files`
+maps a URL path prefix to the filesystem the images under it are read from:
+
+```go
+optiimage.NewWith(optiimage.Config{
+	AllowedOrigins: []optiimage.Origin{{Scheme: "https", Host: "cms.example.com"}},
+	Files:          map[string]fs.FS{"/static/": staticFS}, // what app.Mount("/static/", staticFS) serves
+})
+```
+
+```html
+<img src="/static/avatar.png" width="256" height="256" alt="…">
+```
+
+is then a resized copy of `staticFS`'s `avatar.png`, read when it is first asked
+for, with nothing fetched — so a test, an export or a site whose public address
+is not yet its own works without a network. Before, the only way to resize an
+image of the site's own was to allow the site's origin and let it fetch itself,
+which needed the site to be up at that address.
+
+- The longest prefix wins, and a path naming no file, or one `fs.ValidPath`
+  refuses — `/static/../x.png`, `/static//x.png` — is left as written. Nothing
+  outside the filesystem is reachable.
+- **The file's content is part of the name.** A changed file is a new name at
+  the next render, never new bytes under an immutable old one, and a name a
+  previous build recorded for content this one no longer has is refused rather
+  than served with the new content. The hash is taken once per process, or on
+  every render in development, where the file is the one being edited.
+- `Files` has no JSON form: a filesystem is the application's to hand over.
 
 ## Only declared-size images
 
@@ -319,6 +351,14 @@ content-addressed and cached for a year, so without this the only fix would be
 restarting the process.
 
 ## Changes
+
+### v0.3.0
+
+- **`Config.Files` reads the site's own images from its filesystem.** A path
+  under a prefix — `/static/avatar.png` with `{"/static/": staticFS}` — is resized
+  from the file, with no request made. The file's content is part of the image's
+  name. Names of images from an origin are unchanged. See
+  [The site's own images](#the-sites-own-images-files).
 
 ### v0.2.3
 

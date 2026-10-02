@@ -26,6 +26,10 @@ type recipe struct {
 	// always stands for one decision: change the threshold and the images it
 	// affects get new names rather than new bytes under old ones.
 	Alpha float64
+	// Digest is the hex SHA-256 of a local source's content, and empty for one
+	// fetched from an origin: a file of the site's own can change under the same
+	// path with the next build, and the name has to change with it.
+	Digest string
 }
 
 // name is the file this recipe is served as.
@@ -47,6 +51,10 @@ func (r recipe) name() string {
 		// "alpha2" names the rule that ignores nearly opaque pixels; the first one
 		// counted any, so its images are made again under names of their own.
 		key += "|alpha2:" + strconv.FormatFloat(r.Alpha, 'g', -1, 64)
+	}
+	if r.Digest != "" {
+		// Only for a local source, so an origin's names are what they were.
+		key += "|sha256:" + r.Digest
 	}
 	sum := sha256.Sum256([]byte(key))
 	return hex.EncodeToString(sum[:16]) + r.Format.ext
@@ -86,11 +94,12 @@ type persistedRecipe struct {
 	Height int     `json:"height"`
 	Format string  `json:"format"`
 	Alpha  float64 `json:"alpha,omitempty"`
+	Digest string  `json:"digest,omitempty"`
 }
 
 func (r recipe) marshal() ([]byte, error) {
 	return json.Marshal(persistedRecipe{
-		Source: r.Source, Width: r.Width, Height: r.Height, Format: r.Format.name, Alpha: r.Alpha,
+		Source: r.Source, Width: r.Width, Height: r.Height, Format: r.Format.name, Alpha: r.Alpha, Digest: r.Digest,
 	})
 }
 
@@ -110,7 +119,7 @@ func unmarshalRecipe(name string, data []byte) (recipe, bool) {
 	if !known || p.Width <= 0 || p.Height <= 0 {
 		return recipe{}, false
 	}
-	r := recipe{Source: p.Source, Width: p.Width, Height: p.Height, Format: format, Alpha: p.Alpha}
+	r := recipe{Source: p.Source, Width: p.Width, Height: p.Height, Format: format, Alpha: p.Alpha, Digest: p.Digest}
 	if r.name() != name {
 		return recipe{}, false
 	}

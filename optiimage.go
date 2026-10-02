@@ -3,7 +3,7 @@
 //
 //	app, err := collage.New(&collage.Config{
 //		Plugins: []collage.Plugin{optiimage.New()},
-//		PluginConfig: cfg, // must name at least one allowed origin
+//		PluginConfig: cfg, // must name an allowed origin, or Files a filesystem
 //	})
 //
 // It has to be supplied through Config.Plugins: it registers the route it serves
@@ -12,7 +12,7 @@
 // # What it does, and when
 //
 // The rewrite happens during the render: an <img> with width, height and a src on
-// an allowed origin has its src replaced with a content-addressed name under the
+// an allowed origin, or under a Config.Files prefix, has its src replaced with a content-addressed name under the
 // plugin's own prefix. Nothing is fetched at that point.
 //
 // The fetch, the decode and the resize happen on the first request for that URL.
@@ -39,6 +39,7 @@ import (
 	"image/png"
 	"io"
 	"log/slog"
+	"maps"
 	"net/http"
 	"net/url"
 	"path"
@@ -56,14 +57,16 @@ import (
 
 // Plugin rewrites and serves optimised images.
 type Plugin struct {
-	cfg    Config
-	store  *store
-	client *http.Client
-	log    *slog.Logger
+	cfg     Config
+	store   *store
+	client  *http.Client
+	log     *slog.Logger
+	devMode bool
+	digests digests
 }
 
 // New returns a plugin configured entirely from the application. It does nothing
-// until an allowed origin is configured.
+// until an allowed origin, or a filesystem in Files, is configured.
 func New() *Plugin { return &Plugin{} }
 
 // NewWith returns a plugin with cfg as its starting point, which the application's
@@ -75,11 +78,12 @@ func New() *Plugin { return &Plugin{} }
 // written into the caller's slice.
 func NewWith(cfg Config) *Plugin {
 	cfg.AllowedOrigins = slices.Clone(cfg.AllowedOrigins)
+	cfg.Files = maps.Clone(cfg.Files)
 	return &Plugin{cfg: cfg}
 }
 
 func (p *Plugin) Name() string    { return Name }
-func (p *Plugin) Version() string { return "0.2.4" }
+func (p *Plugin) Version() string { return "0.3.0" }
 
 // Configure decodes the configuration and prepares the store. It does not mount the
 // images: that needs Host, which Init receives.
@@ -146,8 +150,9 @@ func (p *Plugin) Init(_ context.Context, host collage.Host) error {
 	if p.log == nil {
 		p.log = host.Logger()
 	}
+	p.devMode = host.DevMode()
 	if !p.active() {
-		// Configured with no origins, or disabled. Mounting anyway would claim URL
+		// Configured with no origins and no files, or disabled. Mounting anyway would claim URL
 		// space for a filesystem that is always empty.
 		return nil
 	}
@@ -322,7 +327,7 @@ func (p *Plugin) Shutdown(context.Context) error { return nil }
 
 // active reports whether the plugin has anything to do.
 func (p *Plugin) active() bool {
-	return !p.cfg.Disabled && len(p.cfg.AllowedOrigins) > 0 && p.store != nil
+	return !p.cfg.Disabled && (len(p.cfg.AllowedOrigins) > 0 || len(p.cfg.Files) > 0) && p.store != nil
 }
 
 // OnAfterRender rewrites the page's images.
@@ -348,37 +353,9 @@ func (p *Plugin) fetchContext() context.Context {
 
 // produce fetches, decodes, resizes and re-encodes one image.
 func (p *Plugin) produce(ctx context.Context, r recipe) ([]byte, error) {
-	source, allowed := p.cfg.allows(r.Source)
-	if !allowed {
-		// Re-checked even though a recipe exists only because this plugin recorded
-		// it: the allowlist may have been narrowed since — a recipe read back from
-		// disk may have been recorded by a process with a wider one — and a name
-		// must not outlive the permission it was minted under.
-		return nil, fmt.Errorf("opti-image: %q is not an allowed origin", r.Source)
-	}
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, source.String(), nil)
+	body, err := p.sourceBytes(ctx, r)
 	if err != nil {
 		return nil, err
-	}
-	resp, err := p.client.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		io.Copy(io.Discard, resp.Body)
-		return nil, fmt.Errorf("opti-image: origin answered %s", resp.Status)
-	}
-
-	// Limited before reading, not after: a body with no Content-Length, or a lying
-	// one, is exactly the case a limit exists for.
-	body, err := io.ReadAll(io.LimitReader(resp.Body, p.cfg.MaxSourceBytes+1))
-	if err != nil {
-		return nil, err
-	}
-	if int64(len(body)) > p.cfg.MaxSourceBytes {
-		return nil, fmt.Errorf("opti-image: source is larger than %d bytes", p.cfg.MaxSourceBytes)
 	}
 
 	// The header is decoded first so an enormous bitmap is refused before it is
@@ -427,4 +404,41 @@ func (p *Plugin) encode(img image.Image, format outputFormat) ([]byte, error) {
 		}
 	}
 	return buf.Bytes(), nil
+}
+
+// fetch reads a recipe's source from its allowed origin.
+func (p *Plugin) fetch(ctx context.Context, r recipe) ([]byte, error) {
+	source, allowed := p.cfg.allows(r.Source)
+	if !allowed {
+		// Re-checked even though a recipe exists only because this plugin recorded
+		// it: the allowlist may have been narrowed since — a recipe read back from
+		// disk may have been recorded by a process with a wider one — and a name
+		// must not outlive the permission it was minted under.
+		return nil, fmt.Errorf("opti-image: %q is not an allowed origin", r.Source)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, source.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := p.client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		io.Copy(io.Discard, resp.Body)
+		return nil, fmt.Errorf("opti-image: origin answered %s", resp.Status)
+	}
+
+	// Limited before reading, not after: a body with no Content-Length, or a lying
+	// one, is exactly the case a limit exists for.
+	body, err := io.ReadAll(io.LimitReader(resp.Body, p.cfg.MaxSourceBytes+1))
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(body)) > p.cfg.MaxSourceBytes {
+		return nil, fmt.Errorf("opti-image: source is larger than %d bytes", p.cfg.MaxSourceBytes)
+	}
+	return body, nil
 }

@@ -3,6 +3,7 @@ package optiimage
 import (
 	"encoding/json"
 	"fmt"
+	"io/fs"
 	"net/url"
 	"path/filepath"
 	"strings"
@@ -28,6 +29,15 @@ type Config struct {
 	// disables the plugin entirely rather than allowing everything: a fetcher that
 	// defaults to "any host" is an SSRF primitive wearing a feature's name.
 	AllowedOrigins []Origin `json:"allowedOrigins"`
+
+	// Files maps a URL path prefix to the filesystem the site's own images under
+	// it are read from: {"/static/": staticFS} makes <img src="/static/avatar.png"
+	// width="256" height="256"> a resized copy of staticFS's avatar.png, read with
+	// no request made. The site's own images need no origin, a request to itself,
+	// or a network — in a test or an export either. The file's content is part of
+	// the image's name, so a changed file is a new name, not new bytes under an old
+	// one. Not in the JSON form: a filesystem is the application's to hand over.
+	Files map[string]fs.FS `json:"-"`
 	// Prefix is the URL prefix optimised images are served under. It must begin
 	// and end with "/". Defaults to "/_image/".
 	Prefix string `json:"prefix"`
@@ -116,6 +126,11 @@ func (c Config) validate() error {
 	if c.AlphaThreshold < 0 || c.AlphaThreshold >= 1 {
 		return fmt.Errorf("opti-image: alphaThreshold %v must be at least 0 and below 1", c.AlphaThreshold)
 	}
+	for prefix := range c.Files {
+		if !strings.HasPrefix(prefix, "/") || !strings.HasSuffix(prefix, "/") || strings.HasPrefix(prefix, "//") {
+			return fmt.Errorf("opti-image: files prefix %q must begin and end with \"/\", such as \"/static/\"", prefix)
+		}
+	}
 	for _, origin := range c.AllowedOrigins {
 		if origin.Host == "" {
 			return fmt.Errorf("opti-image: an allowed origin has no host")
@@ -146,6 +161,34 @@ func (c Config) allows(raw string) (*url.URL, bool) {
 		}
 	}
 	return nil, false
+}
+
+// local reports whether raw is a path under one of Files' prefixes, and returns
+// the filesystem and the file in it, and raw parsed. The longest prefix wins, and
+// a file name fs.ValidPath refuses — "..", an empty element — is no file, so
+// nothing outside the filesystem is reachable however the path is spelled.
+func (c Config) local(raw string) (fs.FS, string, *url.URL, bool) {
+	if len(c.Files) == 0 || !strings.HasPrefix(raw, "/") || strings.HasPrefix(raw, "//") {
+		return nil, "", nil, false
+	}
+	parsed, err := url.Parse(raw)
+	if err != nil || parsed.Scheme != "" || parsed.Host != "" {
+		return nil, "", nil, false
+	}
+	best := ""
+	for prefix := range c.Files {
+		if strings.HasPrefix(parsed.Path, prefix) && len(prefix) > len(best) {
+			best = prefix
+		}
+	}
+	if best == "" || c.Files[best] == nil {
+		return nil, "", nil, false
+	}
+	file := strings.TrimPrefix(parsed.Path, best)
+	if file == "" || !fs.ValidPath(file) {
+		return nil, "", nil, false
+	}
+	return c.Files[best], file, parsed, true
 }
 
 // Duration is a time.Duration that reads "10s" from JSON as well as a number.
