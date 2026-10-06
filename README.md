@@ -352,6 +352,11 @@ restarting the process.
 
 ## Changes
 
+### v0.3.1
+
+- Built against collage v0.49.0, whose fragment data is a typed `collage.Data`;
+  the tests use `collage.Load`. Requires collage v0.49.0.
+
 ### v0.3.0
 
 - **`Config.Files` reads the site's own images from its filesystem.** A path

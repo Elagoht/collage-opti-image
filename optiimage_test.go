@@ -127,9 +127,9 @@ func newSiteConfigured(t *testing.T, plug *optiimage.Plugin, pluginConfig json.R
 
 	page := collage.NewPage("gallery").
 		WithContent(collage.NewFragment("gallery", "pages/gallery.html").
-			WithDataHandler(func(context.Context, *collage.RenderContext) (any, []string, error) { // any: the framework's own handler signature
-				return struct{ Body string }{Body: bodyHTML}, nil, nil
-			}).
+			WithData(collage.Load(func(context.Context, *collage.RenderContext) (struct{ Body string }, error) {
+				return struct{ Body string }{Body: bodyHTML}, nil
+			})).
 			Build()).
 		WithPath("en", "/gallery").
 		Build()

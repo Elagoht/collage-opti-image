@@ -37,11 +37,11 @@ func TestPlugin_StaticBuildWritesTheImages(t *testing.T) {
 	}
 	page := collage.NewPage("gallery").
 		WithContent(collage.NewFragment("gallery", "pages/gallery.html").
-			WithDataHandler(func(context.Context, *collage.RenderContext) (any, []string, error) { // any: the framework's own handler signature
+			WithData(collage.Load(func(context.Context, *collage.RenderContext) (struct{ Body string }, error) {
 				return struct{ Body string }{
 					Body: `<img src="` + srv.URL + `/a.png" width="200" height="150">`,
-				}, nil, nil
-			}).Build()).
+				}, nil
+			})).Build()).
 		WithPath("en", "/gallery").
 		Static().
 		Build()
@@ -99,9 +99,9 @@ func TestPlugin_StaticBuildWritesNoImagesWhenNoneAreUsed(t *testing.T) {
 	}
 	page := collage.NewPage("gallery").
 		WithContent(collage.NewFragment("gallery", "pages/gallery.html").
-			WithDataHandler(func(context.Context, *collage.RenderContext) (any, []string, error) { // any: the framework's own handler signature
-				return struct{ Body string }{Body: `<p>no pictures here</p>`}, nil, nil
-			}).Build()).
+			WithData(collage.Load(func(context.Context, *collage.RenderContext) (struct{ Body string }, error) {
+				return struct{ Body string }{Body: `<p>no pictures here</p>`}, nil
+			})).Build()).
 		WithPath("en", "/gallery").
 		Static().
 		Build()
