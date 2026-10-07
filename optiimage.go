@@ -83,15 +83,17 @@ func NewWith(cfg Config) *Plugin {
 }
 
 func (p *Plugin) Name() string    { return Name }
-func (p *Plugin) Version() string { return "0.3.1" }
+func (p *Plugin) Version() string { return "0.3.2" }
 
 // Configure decodes the configuration and prepares the store. It does not mount the
 // images: that needs Host, which Init receives.
 func (p *Plugin) Configure(_ context.Context, host collage.ConfigHost) error {
 	p.log = host.Logger()
-	if err := host.Config(&p.cfg); err != nil {
+	cfg, err := collage.PluginConfig(host, p.cfg)
+	if err != nil {
 		return err
 	}
+	p.cfg = cfg
 	p.cfg = p.cfg.withDefaults()
 	if err := p.cfg.validate(); err != nil {
 		return err
