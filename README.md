@@ -352,6 +352,10 @@ restarting the process.
 
 ## Changes
 
+### v0.3.4
+
+- Retracts v0.3.2, tagged by mistake on the previous release's code. Use v0.3.3 or later. Nothing else changes.
+
 ### v0.3.3
 
 - Requires collage v0.50.0. Plugin configuration is read with `collage.PluginConfig`, since `host.Config` is gone. Nothing else changes.

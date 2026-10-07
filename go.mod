@@ -12,3 +12,5 @@ require (
 	github.com/HugoSmits86/nativewebp v1.3.0
 	golang.org/x/image v0.24.0
 )
+
+retract v0.3.2 // tagged by mistake on the previous release's code; use v0.3.3 or later
