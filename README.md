@@ -360,7 +360,7 @@ restarting the process.
 
 - Requires collage v0.50.0. Plugin configuration is read with `collage.PluginConfig`, since `host.Config` is gone. Nothing else changes.
 
-### v0.3.3
+### v0.3.1
 
 - Built against collage v0.49.0, whose fragment data is a typed `collage.Data`;
   the tests use `collage.Load`. Requires collage v0.49.0.
