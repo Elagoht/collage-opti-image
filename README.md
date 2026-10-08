@@ -181,7 +181,8 @@ What a name can promise depends on where the image came from:
   time. `originMaxAge` is a duration, `"24h"` or `"30m"`, at least one second.
 
 In development every image is `no-store`, as every mounted file is. A static build
-writes files, not headers: the host serving it decides their `Cache-Control`.
+records each image's headers by asking the application for it, so the year or
+`originMaxAge` an image is served with is the one its exported file carries.
 
 ## Static builds
 
