@@ -36,8 +36,10 @@ type recipe struct {
 //
 // Content-addressed: the name is a hash of what the image is, so two pages asking
 // for the same picture at the same size share one file, and a file's name cannot
-// describe anything but its contents. That is what makes "cache forever" honest
-// rather than optimistic.
+// describe anything but what it was made from. For a local file, whose digest is
+// part of the recipe, that is what makes "cache forever" honest rather than
+// optimistic; an origin's file can change under the same URL, so its images are
+// cached for OriginMaxAge instead.
 //
 // It also replaces a signature. An earlier design put the source URL in the path
 // and signed it, because the endpoint would otherwise fetch whatever it was handed

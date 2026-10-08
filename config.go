@@ -53,6 +53,15 @@ type Config struct {
 	// In JSON it is written the way a person writes a duration — "10s", "500ms" —
 	// as well as as a number of nanoseconds. See Duration.
 	FetchTimeout Duration `json:"fetchTimeout"`
+	// OriginMaxAge is how long a browser or CDN may keep an image fetched from an
+	// origin before asking again: its Cache-Control is "public, max-age=" this, in
+	// seconds, and never immutable. Defaults to 24h; at least 1s. An origin's image
+	// is named by its recipe — URL, size, format — not by its content, so the
+	// origin can change it under the same name, and a mistake fixed there reaches
+	// readers within this time. Images of the site's own Files have their content
+	// in their name and are served for a year, immutable. Written like
+	// FetchTimeout: "24h", "30m", or nanoseconds.
+	OriginMaxAge Duration `json:"originMaxAge"`
 	// CacheBytes caps the memory held by resized images. Defaults to 64 MiB.
 	CacheBytes int64 `json:"cacheBytes"`
 	// CacheDir is where produced images are kept between restarts. An empty value
@@ -103,6 +112,9 @@ func (c Config) withDefaults() Config {
 	if c.FetchTimeout <= 0 {
 		c.FetchTimeout = Duration(10 * time.Second)
 	}
+	if c.OriginMaxAge == 0 {
+		c.OriginMaxAge = Duration(24 * time.Hour)
+	}
 	if c.CacheBytes <= 0 {
 		c.CacheBytes = 64 << 20
 	}
@@ -122,6 +134,9 @@ func (c Config) validate() error {
 	}
 	if c.Prefix == "/" {
 		return fmt.Errorf("opti-image: prefix must not be \"/\", which would claim the whole site")
+	}
+	if c.OriginMaxAge < Duration(time.Second) {
+		return fmt.Errorf("opti-image: originMaxAge %v must be at least 1s: max-age counts whole seconds", time.Duration(c.OriginMaxAge))
 	}
 	if c.AlphaThreshold < 0 || c.AlphaThreshold >= 1 {
 		return fmt.Errorf("opti-image: alphaThreshold %v must be at least 0 and below 1", c.AlphaThreshold)
@@ -213,11 +228,11 @@ func (d *Duration) UnmarshalJSON(data []byte) error {
 
 	var asText string
 	if err := json.Unmarshal(data, &asText); err != nil {
-		return fmt.Errorf("opti-image: fetchTimeout must be a duration such as \"10s\", or nanoseconds: %w", err)
+		return fmt.Errorf("opti-image: a duration (fetchTimeout, originMaxAge) must be written like \"10s\", or as nanoseconds: %w", err)
 	}
 	parsed, err := time.ParseDuration(asText)
 	if err != nil {
-		return fmt.Errorf("opti-image: fetchTimeout %q: %w", asText, err)
+		return fmt.Errorf("opti-image: duration (fetchTimeout, originMaxAge) %q: %w", asText, err)
 	}
 	*d = Duration(parsed)
 	return nil

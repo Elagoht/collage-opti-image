@@ -83,7 +83,7 @@ func NewWith(cfg Config) *Plugin {
 }
 
 func (p *Plugin) Name() string    { return Name }
-func (p *Plugin) Version() string { return "0.3.4" }
+func (p *Plugin) Version() string { return "0.3.5" }
 
 // Configure decodes the configuration and prepares the store. It does not mount the
 // images: that needs Host, which Init receives.
@@ -120,9 +120,10 @@ func (p *Plugin) Configure(_ context.Context, host collage.ConfigHost) error {
 // names, and forgetting what they mean would turn every one of those links into a
 // 404.
 //
-// The case it exists for is an origin that served a wrong file. The names are
-// content-addressed and cached for a year, so without this the only fix would be
-// restarting the process.
+// The case it exists for is an origin that served a wrong file. An origin's
+// images are named by their recipe, so without this the process would keep
+// serving the wrong one until it restarted; readers holding it keep it for at
+// most OriginMaxAge.
 func (p *Plugin) Purge() {
 	if p.store != nil {
 		p.store.forget("")
@@ -146,8 +147,12 @@ func (p *Plugin) PurgeSource(source string) {
 // nothing running behind it. A routed document could not be enumerated that way —
 // its path is dynamic, and a build has no way to guess what would be asked for.
 //
-// Cache-Control says immutable because the names are content-addressed: a name
-// cannot come to mean different bytes, so a year is not optimism.
+// Cache-Control depends on where an image came from. One of the site's own Files
+// has the file's content in its name, so the name cannot come to mean different
+// bytes and a year, immutable, is not optimism; cacheHeaders gives it that. One
+// fetched from an origin is named by its recipe alone — the origin can change the
+// file under the same URL — so the mount's own header is the shorter
+// "public, max-age=<OriginMaxAge>", with no immutable.
 func (p *Plugin) Init(_ context.Context, host collage.Host) error {
 	if p.log == nil {
 		p.log = host.Logger()
@@ -158,8 +163,11 @@ func (p *Plugin) Init(_ context.Context, host collage.Host) error {
 		// space for a filesystem that is always empty.
 		return nil
 	}
-	return host.Mount(p.cfg.Prefix, &imageFS{plugin: p},
-		collage.WithCacheControl("public, max-age=31536000, immutable"))
+	if err := host.Mount(p.cfg.Prefix, &imageFS{plugin: p},
+		collage.WithCacheControl(p.originCacheControl())); err != nil {
+		return err
+	}
+	return host.Use(p.cacheHeaders)
 }
 
 // outputFormat is one format the plugin can serve. The extension is what the mount

@@ -68,6 +68,23 @@
         "type": "boolean",
         "description": "NoDiskCache keeps produced images in memory only, so nothing is written anywhere. A read-only deployment does not need this — a directory that cannot be created or written to disables the disk cache by itself, with one line in the log — but a deployment that would rather not write at all can say so."
       },
+      "originMaxAge": {
+        "description": "OriginMaxAge is how long a browser or CDN may keep an image fetched from an origin before asking again: its Cache-Control is \"public, max-age=\" this, in seconds, and never immutable. Defaults to 24h; at least 1s. An origin's image is named by its recipe — URL, size, format — not by its content, so the origin can change it under the same name, and a mistake fixed there reaches readers within this time. Images of the site's own Files have their content in their name and are served for a year, immutable. Written like FetchTimeout: \"24h\", \"30m\", or nanoseconds.",
+        "anyOf": [
+          {
+            "type": "string",
+            "pattern": "^(\\d+(\\.\\d+)?(ns|us|µs|ms|s|m|h))+$",
+            "examples": [
+              "24h",
+              "30m"
+            ]
+          },
+          {
+            "type": "integer",
+            "description": "nanoseconds"
+          }
+        ]
+      },
       "prefix": {
         "type": "string",
         "description": "Prefix is the URL prefix optimised images are served under. It must begin and end with \"/\". Defaults to \"/_image/\"."

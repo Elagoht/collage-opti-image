@@ -25,6 +25,7 @@ images from, and that happens while the application is built.
     "maxSourceBytes": 8388608,
     "maxPixels": 40000000,
     "fetchTimeout": "10s",
+    "originMaxAge": "24h",
     "quality": 82,
     "webp": "auto"
   }
@@ -132,9 +133,7 @@ A name is a hash of what the image is — its source, its size, its format:
 /_image/8f2a91c0b4e7d3a6.webp
 ```
 
-Content-addressed, so two pages asking for the same picture at the same size share
-one file and a name cannot come to mean different bytes. That is what makes
-`immutable` and a one-year `max-age` honest rather than optimistic.
+Two pages asking for the same picture at the same size share one file.
 
 It also replaces an access-control problem instead of solving one. An earlier design
 put the source URL in the path and signed it with an HMAC, because the endpoint would
@@ -166,6 +165,23 @@ A fleet of servers behind a shared page cache would hand one process's URLs to
 another: they know each other's names when they share `cacheDir`, and not otherwise
 — so a multi-process deployment wants a shared cache directory or the pages built
 statically.
+
+## How long an image is cached
+
+What a name can promise depends on where the image came from:
+
+- **An image of the site's own `Files`** has the file's content in its name, so the
+  name cannot come to mean different bytes. It is served with
+  `public, max-age=31536000, immutable`: a year, and no revalidation.
+- **An image fetched from an origin** is named by its recipe — URL, size, format —
+  not by its content. The origin can change the file under the same URL, and the
+  name would not change with it. It is served with `public, max-age=<originMaxAge>`,
+  a day by default, and never `immutable`, so a wrong file fixed at the origin
+  and [purged here](#clearing-what-it-has-produced) reaches readers within that
+  time. `originMaxAge` is a duration, `"24h"` or `"30m"`, at least one second.
+
+In development every image is `no-store`, as every mounted file is. A static build
+writes files, not headers: the host serving it decides their `Cache-Control`.
 
 ## Static builds
 
@@ -346,11 +362,25 @@ found through the recipes it left — and keep the recipes. A page already rende
 these names, and forgetting what a name means would turn every one of those links
 into a 404 rather than into a re-fetch.
 
-The case it exists for is an origin that served a wrong file. The names are
-content-addressed and cached for a year, so without this the only fix would be
-restarting the process.
+The case it exists for is an origin that served a wrong file. An origin's images
+are named by their recipe, so without this the only fix would be restarting the
+process; a reader who already has the wrong one keeps it for at most
+`originMaxAge`.
 
 ## Changes
+
+### v0.3.5
+
+- **Images from an origin are no longer `immutable`.** They were served with
+  `public, max-age=31536000, immutable` like every other image, but their names
+  are made from the recipe, not the content, so a wrong file from an origin stayed
+  in readers' caches for a year. They are now served with
+  `public, max-age=<originMaxAge>`, a new option defaulting to `24h`. Images of the
+  site's own `Files`, whose names carry their content's digest, keep the year and
+  `immutable`. See [How long a name is cached](#how-long-an-image-is-cached).
+- A duration that does not parse is reported without naming `fetchTimeout`
+  alone, since `originMaxAge` is read the same way.
+- Requires collage v0.55.0.
 
 ### v0.3.4
 
