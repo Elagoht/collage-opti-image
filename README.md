@@ -370,6 +370,12 @@ process; a reader who already has the wrong one keeps it for at most
 
 ## Changes
 
+### v0.3.6
+
+- collage.json is regenerated for editors: duration examples are the
+  generator's. Nothing else changes.
+- Requires collage v0.58.0.
+
 ### v0.3.5
 
 - **Images from an origin are no longer `immutable`.** They were served with

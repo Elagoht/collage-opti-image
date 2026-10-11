@@ -75,8 +75,8 @@
             "type": "string",
             "pattern": "^(\\d+(\\.\\d+)?(ns|us|µs|ms|s|m|h))+$",
             "examples": [
-              "24h",
-              "30m"
+              "30s",
+              "5m"
             ]
           },
           {
