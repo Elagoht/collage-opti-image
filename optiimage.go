@@ -2,8 +2,9 @@
 // a height to resized copies it serves itself.
 //
 //	app, err := collage.New(&collage.Config{
-//		Plugins: []collage.Plugin{optiimage.New()},
-//		PluginConfig: cfg, // must name an allowed origin, or Files a filesystem
+//		Plugins: []collage.Plugin{optiimage.New(optiimage.Options{
+//			AllowedOrigins: []string{"https://cms.example.com"}, // or Files, a filesystem
+//		})},
 //	})
 //
 // It has to be supplied through Config.Plugins: it registers the route it serves
@@ -12,7 +13,7 @@
 // # What it does, and when
 //
 // The rewrite happens during the render: an <img> with width, height and a src on
-// an allowed origin, or under a Config.Files prefix, has its src replaced with a content-addressed name under the
+// an allowed origin, or under a Options.Files prefix, has its src replaced with a content-addressed name under the
 // plugin's own prefix. Nothing is fetched at that point.
 //
 // The fetch, the decode and the resize happen on the first request for that URL.
@@ -57,7 +58,7 @@ import (
 
 // Plugin rewrites and serves optimised images.
 type Plugin struct {
-	cfg     Config
+	cfg     Options
 	store   *store
 	client  *http.Client
 	log     *slog.Logger
@@ -65,25 +66,22 @@ type Plugin struct {
 	digests digests
 }
 
-// New returns a plugin configured entirely from the application. It does nothing
-// until an allowed origin, or a filesystem in Files, is configured.
-func New() *Plugin { return &Plugin{} }
-
-// NewWith returns a plugin with cfg as its starting point, which the application's
+// New returns a plugin with opts as its starting point, which the application's
 // own configuration is decoded over: a key the JSON has replaces the field
-// entirely, and a key it lacks leaves cfg's value.
+// entirely, and a key it lacks leaves opts' value. It does nothing until an
+// allowed origin, or a filesystem in Files, is configured.
 //
 // The origins are copied, because encoding/json decodes an array into the slice it
 // finds, reusing its backing array — without the copy, the JSON's origins would be
 // written into the caller's slice.
-func NewWith(cfg Config) *Plugin {
-	cfg.AllowedOrigins = slices.Clone(cfg.AllowedOrigins)
-	cfg.Files = maps.Clone(cfg.Files)
-	return &Plugin{cfg: cfg}
+func New(opts Options) *Plugin {
+	opts.AllowedOrigins = slices.Clone(opts.AllowedOrigins)
+	opts.Files = maps.Clone(opts.Files)
+	return &Plugin{cfg: opts}
 }
 
 func (p *Plugin) Name() string    { return Name }
-func (p *Plugin) Version() string { return "0.3.7" }
+func (p *Plugin) Version() string { return "0.4.0" }
 
 // Configure decodes the configuration and prepares the store. It does not mount the
 // images: that needs Host, which Init receives.

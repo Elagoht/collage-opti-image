@@ -60,7 +60,7 @@ func newCMS(t *testing.T) *httptest.Server {
 // JPEG on a black background.
 func TestFormat_AnExtensionlessSourceKeepsItsTransparency(t *testing.T) {
 	srv := newCMS(t)
-	site := newSite(t, optiimage.Config{AllowedOrigins: allow(srv)},
+	site := newSite(t, optiimage.Options{AllowedOrigins: allow(srv)},
 		`<img src="`+srv.URL+`/uploads/logo" width="200" height="150">`)
 
 	src := srcOf(t, get(t, site, "/gallery").Body.String())
@@ -94,7 +94,7 @@ func TestFormat_AnExtensionlessSourceKeepsItsTransparency(t *testing.T) {
 
 func TestFormat_AnExtensionlessPhotographIsAJPEG(t *testing.T) {
 	srv := newCMS(t)
-	site := newSite(t, optiimage.Config{AllowedOrigins: allow(srv)},
+	site := newSite(t, optiimage.Options{AllowedOrigins: allow(srv)},
 		`<img src="`+srv.URL+`/uploads/photo" width="200" height="150">`)
 
 	rec := get(t, site, srcOf(t, get(t, site, "/gallery").Body.String()))
@@ -113,7 +113,7 @@ func TestFormat_AnExtensionlessPhotographIsAJPEG(t *testing.T) {
 // suffix check it replaced called it a JPEG.
 func TestFormat_AQueryStringDoesNotHideTheExtension(t *testing.T) {
 	_, srv := newOrigin(t, 400, 300)
-	site := newSite(t, optiimage.Config{AllowedOrigins: allow(srv)},
+	site := newSite(t, optiimage.Options{AllowedOrigins: allow(srv)},
 		`<img src="`+srv.URL+`/a.png?v=3" width="200" height="150">`)
 
 	src := srcOf(t, get(t, site, "/gallery").Body.String())

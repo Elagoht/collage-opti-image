@@ -18,7 +18,7 @@ func TestDisk_SurvivesARestart(t *testing.T) {
 	dir := t.TempDir()
 	markup := `<img src="` + srv.URL + `/a.png" width="200" height="150">`
 
-	first := newSiteWith(t, optiimage.NewWith(optiimage.Config{
+	first := newSiteWith(t, optiimage.New(optiimage.Options{
 		AllowedOrigins: allow(srv), CacheDir: dir,
 	}), markup)
 
@@ -34,7 +34,7 @@ func TestDisk_SurvivesARestart(t *testing.T) {
 
 	// A second application over the same directory: a restart, as far as anything
 	// here can tell.
-	second := newSiteWith(t, optiimage.NewWith(optiimage.Config{
+	second := newSiteWith(t, optiimage.New(optiimage.Options{
 		AllowedOrigins: allow(srv), CacheDir: dir,
 	}), markup)
 
@@ -57,7 +57,7 @@ func TestDisk_PurgeRemovesTheFiles(t *testing.T) {
 	// serve exactly the image the purge was meant to remove.
 	_, srv := newOrigin(t, 400, 300)
 	dir := t.TempDir()
-	p := optiimage.NewWith(optiimage.Config{AllowedOrigins: allow(srv), CacheDir: dir})
+	p := optiimage.New(optiimage.Options{AllowedOrigins: allow(srv), CacheDir: dir})
 	site := newSiteWith(t, p, `<img src="`+srv.URL+`/a.png" width="200" height="150">`)
 
 	get(t, site, srcOf(t, get(t, site, "/gallery").Body.String()))
@@ -126,7 +126,7 @@ func TestDisk_UnwritableDirectoryDegradesToMemory(t *testing.T) {
 		t.Fatalf("plant a file where the directory would go: %v", err)
 	}
 
-	site := newSiteWith(t, optiimage.NewWith(optiimage.Config{
+	site := newSiteWith(t, optiimage.New(optiimage.Options{
 		AllowedOrigins: allow(srv), CacheDir: filepath.Join(blocked, "cache"),
 	}), `<img src="`+srv.URL+`/a.png" width="200" height="150">`)
 
@@ -144,7 +144,7 @@ func TestDisk_NoDiskCacheWritesNothing(t *testing.T) {
 	_, srv := newOrigin(t, 400, 300)
 	dir := t.TempDir()
 
-	site := newSiteWith(t, optiimage.NewWith(optiimage.Config{
+	site := newSiteWith(t, optiimage.New(optiimage.Options{
 		AllowedOrigins: allow(srv), CacheDir: dir, NoDiskCache: true,
 	}), `<img src="`+srv.URL+`/a.png" width="200" height="150">`)
 
@@ -171,7 +171,7 @@ func TestDisk_ServesAStoredImageWithoutRenderingItsPage(t *testing.T) {
 	dir := t.TempDir()
 	markup := `<img src="` + srv.URL + `/a.png" width="200" height="150">`
 
-	first := newSiteWith(t, optiimage.NewWith(optiimage.Config{
+	first := newSiteWith(t, optiimage.New(optiimage.Options{
 		AllowedOrigins: allow(srv), CacheDir: dir,
 	}), markup)
 	src := srcOf(t, get(t, first, "/gallery").Body.String())
@@ -179,7 +179,7 @@ func TestDisk_ServesAStoredImageWithoutRenderingItsPage(t *testing.T) {
 
 	// A fresh application over the same directory, asked for the image and nothing
 	// else. No page is rendered, so no recipe exists.
-	second := newSiteWith(t, optiimage.NewWith(optiimage.Config{
+	second := newSiteWith(t, optiimage.New(optiimage.Options{
 		AllowedOrigins: allow(srv), CacheDir: dir,
 	}), markup)
 
@@ -203,7 +203,7 @@ func TestDisk_ProducesAnImageNoEarlierProcessProduced(t *testing.T) {
 	dir := t.TempDir()
 	markup := `<img src="` + srv.URL + `/a.png" width="200" height="150">`
 
-	first := newSiteWith(t, optiimage.NewWith(optiimage.Config{
+	first := newSiteWith(t, optiimage.New(optiimage.Options{
 		AllowedOrigins: allow(srv), CacheDir: dir,
 	}), markup)
 	src := srcOf(t, get(t, first, "/gallery").Body.String())
@@ -211,7 +211,7 @@ func TestDisk_ProducesAnImageNoEarlierProcessProduced(t *testing.T) {
 		t.Fatalf("the render fetched the origin")
 	}
 
-	second := newSiteWith(t, optiimage.NewWith(optiimage.Config{
+	second := newSiteWith(t, optiimage.New(optiimage.Options{
 		AllowedOrigins: allow(srv), CacheDir: dir,
 	}), markup)
 	rec := get(t, second, src)
@@ -231,12 +231,12 @@ func TestDisk_APersistedRecipeIsCheckedAgainstTheAllowlist(t *testing.T) {
 	dir := t.TempDir()
 	markup := `<img src="` + srv.URL + `/a.png" width="200" height="150">`
 
-	first := newSiteWith(t, optiimage.NewWith(optiimage.Config{
+	first := newSiteWith(t, optiimage.New(optiimage.Options{
 		AllowedOrigins: allow(srv), CacheDir: dir,
 	}), markup)
 	src := srcOf(t, get(t, first, "/gallery").Body.String())
 
-	narrowed := newSiteWith(t, optiimage.NewWith(optiimage.Config{
+	narrowed := newSiteWith(t, optiimage.New(optiimage.Options{
 		AllowedOrigins: allow(other), CacheDir: dir,
 	}), markup)
 	if rec := get(t, narrowed, src); rec.Code == http.StatusOK {
@@ -254,7 +254,7 @@ func TestDisk_ARecipeThatDoesNotMatchItsNameIsIgnored(t *testing.T) {
 	o, srv := newOrigin(t, 400, 300)
 	dir := t.TempDir()
 
-	first := newSiteWith(t, optiimage.NewWith(optiimage.Config{
+	first := newSiteWith(t, optiimage.New(optiimage.Options{
 		AllowedOrigins: allow(srv), CacheDir: dir,
 	}), `<img src="`+srv.URL+`/a.png" width="200" height="150">`)
 	src := srcOf(t, get(t, first, "/gallery").Body.String())
@@ -268,7 +268,7 @@ func TestDisk_ARecipeThatDoesNotMatchItsNameIsIgnored(t *testing.T) {
 		t.Fatalf("plant recipe: %v", err)
 	}
 
-	second := newSiteWith(t, optiimage.NewWith(optiimage.Config{
+	second := newSiteWith(t, optiimage.New(optiimage.Options{
 		AllowedOrigins: allow(srv), CacheDir: dir,
 	}), `<p>nothing rendered</p>`)
 	if rec := get(t, second, src); rec.Code != http.StatusNotFound {
@@ -284,7 +284,7 @@ func TestDisk_ARecipeThatDoesNotMatchItsNameIsIgnored(t *testing.T) {
 func TestDisk_TheRecipesAreNotServed(t *testing.T) {
 	_, srv := newOrigin(t, 400, 300)
 	dir := t.TempDir()
-	site := newSiteWith(t, optiimage.NewWith(optiimage.Config{
+	site := newSiteWith(t, optiimage.New(optiimage.Options{
 		AllowedOrigins: allow(srv), CacheDir: dir,
 	}), `<img src="`+srv.URL+`/a.png" width="200" height="150">`)
 	src := srcOf(t, get(t, site, "/gallery").Body.String())
@@ -302,7 +302,7 @@ func TestDisk_PurgeSourceReachesAnEarlierProcesssImage(t *testing.T) {
 	dir := t.TempDir()
 	markup := `<img src="` + srv.URL + `/a.png" width="200" height="150">`
 
-	first := newSiteWith(t, optiimage.NewWith(optiimage.Config{
+	first := newSiteWith(t, optiimage.New(optiimage.Options{
 		AllowedOrigins: allow(srv), CacheDir: dir,
 	}), markup)
 	get(t, first, srcOf(t, get(t, first, "/gallery").Body.String()))
@@ -310,7 +310,7 @@ func TestDisk_PurgeSourceReachesAnEarlierProcesssImage(t *testing.T) {
 		t.Fatalf("cache dir holds %d images, want 1", n)
 	}
 
-	p := optiimage.NewWith(optiimage.Config{AllowedOrigins: allow(srv), CacheDir: dir})
+	p := optiimage.New(optiimage.Options{AllowedOrigins: allow(srv), CacheDir: dir})
 	newSiteWith(t, p, markup)
 	p.PurgeSource(srv.URL + "/a.png")
 

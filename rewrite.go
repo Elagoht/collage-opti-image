@@ -8,7 +8,7 @@ import (
 )
 
 // rewriteImages replaces the src of every <img> that declares both width and height
-// and points at an allowed origin or a path under Config.Files.
+// and points at an allowed origin or a path under Options.Files.
 //
 // Only declared-size images are touched, and that is the contract rather than a
 // simplification. The declared size is the one piece of information that says how

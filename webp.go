@@ -26,7 +26,7 @@ type WebPEncoder interface {
 // webpEncoder is what RegisterWebPEncoder set, or nil.
 var webpEncoder WebPEncoder
 
-// RegisterWebPEncoder installs the encoder used when Config.WebP asks for WebP,
+// RegisterWebPEncoder installs the encoder used when Options.WebP asks for WebP,
 // replacing the bundled one. It is intended for an init function, and is not safe
 // to call once an application is serving.
 func RegisterWebPEncoder(enc WebPEncoder) { webpEncoder = enc }

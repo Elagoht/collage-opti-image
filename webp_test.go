@@ -18,7 +18,7 @@ import (
 
 func TestWebP_IsServedWhenEnabledAndLinked(t *testing.T) {
 	_, srv := newOrigin(t, 400, 300)
-	site := newSite(t, optiimage.Config{AllowedOrigins: allow(srv), WebP: optiimage.WebPOn},
+	site := newSite(t, optiimage.Options{AllowedOrigins: allow(srv), WebP: optiimage.WebPOn},
 		`<img src="`+srv.URL+`/a.png" width="200" height="150">`)
 
 	src := srcOf(t, get(t, site, "/gallery").Body.String())
@@ -50,7 +50,7 @@ func TestWebP_ConfiguredOffStillServesTheSourceFormat(t *testing.T) {
 	// Linking an encoder must not force its use. A site whose images are
 	// photographs wants JPEG, and says so by leaving WebP false.
 	_, srv := newOrigin(t, 400, 300)
-	site := newSite(t, optiimage.Config{AllowedOrigins: allow(srv)},
+	site := newSite(t, optiimage.Options{AllowedOrigins: allow(srv)},
 		`<img src="`+srv.URL+`/a.png" width="200" height="150">`)
 
 	if src := srcOf(t, get(t, site, "/gallery").Body.String()); !strings.HasSuffix(src, ".png") {
@@ -74,7 +74,7 @@ func TestWebP_AutoConvertsOnlyLosslessSources(t *testing.T) {
 		{cms.URL + "/uploads/logo", "", "image/webp"},
 		{cms.URL + "/uploads/photo", "", "image/jpeg"},
 	} {
-		site := newSite(t, optiimage.Config{AllowedOrigins: origins, WebP: optiimage.WebPAuto},
+		site := newSite(t, optiimage.Options{AllowedOrigins: origins, WebP: optiimage.WebPAuto},
 			`<img src="`+tc.src+`" width="200" height="150">`)
 
 		name := srcOf(t, get(t, site, "/gallery").Body.String())
@@ -99,8 +99,8 @@ func TestWebP_AutoChangesTheNameOfAnExtensionlessSource(t *testing.T) {
 	cms := newCMS(t)
 	markup := `<img src="` + cms.URL + `/uploads/logo" width="200" height="150">`
 
-	off := srcOf(t, get(t, newSite(t, optiimage.Config{AllowedOrigins: allow(cms)}, markup), "/gallery").Body.String())
-	auto := srcOf(t, get(t, newSite(t, optiimage.Config{AllowedOrigins: allow(cms), WebP: optiimage.WebPAuto}, markup), "/gallery").Body.String())
+	off := srcOf(t, get(t, newSite(t, optiimage.Options{AllowedOrigins: allow(cms)}, markup), "/gallery").Body.String())
+	auto := srcOf(t, get(t, newSite(t, optiimage.Options{AllowedOrigins: allow(cms), WebP: optiimage.WebPAuto}, markup), "/gallery").Body.String())
 	if off == auto {
 		t.Errorf("both modes named the image %q", off)
 	}

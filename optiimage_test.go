@@ -7,8 +7,6 @@ import (
 	"image"
 	"image/color"
 	"image/png"
-	"io"
-	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -20,6 +18,7 @@ import (
 	"testing/fstest"
 
 	"github.com/Elagoht/collage/pkg/collage"
+	"github.com/Elagoht/collage/pkg/collagetest"
 
 	optiimage "github.com/Elagoht/collage-opti-image"
 )
@@ -78,10 +77,10 @@ func newOrigin(t *testing.T, w, h int) (*origin, *httptest.Server) {
 	return o, srv
 }
 
-var templates = fstest.MapFS{
+var templates = map[string]string{
 	// safeHTML, because the test's whole input is the markup: escaped, there would
 	// be no <img> element for the plugin to find.
-	"pages/gallery.html": &fstest.MapFile{Data: []byte(`<html><body>{{safeHTML .Body}}</body></html>`)},
+	"pages/gallery.html": `<html><body>{{safeHTML .Body}}</body></html>`,
 }
 
 // newSite builds a site whose one page renders bodyHTML verbatim.
@@ -90,41 +89,29 @@ var templates = fstest.MapFS{
 // .cache/opti-image in the working directory, which for a test is the checkout: one
 // run's images would be the next run's disk hits, and a test counting origin
 // fetches would be counting what an earlier run left behind.
-func newSite(t *testing.T, cfg optiimage.Config, bodyHTML string) http.Handler {
+func newSite(t *testing.T, opts optiimage.Options, bodyHTML string) http.Handler {
 	t.Helper()
-	if cfg.CacheDir == "" {
-		cfg.CacheDir = t.TempDir()
+	if opts.CacheDir == "" {
+		opts.CacheDir = t.TempDir()
 	}
-	return newSiteWith(t, optiimage.NewWith(cfg), bodyHTML)
+	return newSiteWith(t, optiimage.New(opts), bodyHTML)
 }
 
 // newSiteWith builds the site around a plugin the caller keeps a handle on, which
 // is what a test calling Purge needs.
 func newSiteWith(t *testing.T, plug *optiimage.Plugin, bodyHTML string) http.Handler {
 	t.Helper()
-	return newSiteConfigured(t, plug, nil, bodyHTML)
+	return newSiteConfigured(t, plug, "", bodyHTML)
 }
 
 // newSiteConfigured also hands the application a plugin configuration, the way a
-// configuration file would.
-func newSiteConfigured(t *testing.T, plug *optiimage.Plugin, pluginConfig json.RawMessage, bodyHTML string) http.Handler {
+// configuration file would; "" is none.
+func newSiteConfigured(t *testing.T, plug *optiimage.Plugin, pluginConfig string, bodyHTML string) http.Handler {
 	t.Helper()
+	return collagetest.NewSite(t, siteOptions(plug, pluginConfig, bodyHTML)...).App.Handler()
+}
 
-	var plugins map[string]json.RawMessage
-	if pluginConfig != nil {
-		plugins = map[string]json.RawMessage{optiimage.Name: pluginConfig}
-	}
-	app, err := collage.New(&collage.Config{
-		Logger:       slog.New(slog.NewTextHandler(io.Discard, nil)),
-		Template:     collage.TemplateConfig{FS: templates, Extension: ".html"},
-		Plugins:      []collage.Plugin{plug},
-		PluginConfig: plugins,
-		Cache:        collage.CacheConfig{Enabled: true, Type: "memory", MaxEntries: 64},
-	})
-	if err != nil {
-		t.Fatalf("New: %v", err)
-	}
-
+func siteOptions(plug *optiimage.Plugin, pluginConfig string, bodyHTML string) []collagetest.SiteOption {
 	page := collage.NewPage("gallery").
 		WithContent(collage.NewFragment("gallery", "pages/gallery.html").
 			WithData(collage.Load(func(context.Context, *collage.RenderContext) (struct{ Body string }, error) {
@@ -133,10 +120,18 @@ func newSiteConfigured(t *testing.T, plug *optiimage.Plugin, pluginConfig json.R
 			Build()).
 		WithPath("en", "/gallery").
 		Build()
-	if err := app.RegisterPage(page); err != nil {
-		t.Fatalf("RegisterPage: %v", err)
+	options := []collagetest.SiteOption{
+		collagetest.WithPlugins(plug),
+		collagetest.WithTemplates(templates),
+		collagetest.WithRegister(page),
+		collagetest.WithConfig(func(c *collage.Config) {
+			c.Cache = collage.CacheConfig{Enabled: true, Type: "memory", MaxEntries: 64}
+		}),
 	}
-	return app.Handler()
+	if pluginConfig != "" {
+		options = append(options, collagetest.WithPluginConfig(optiimage.Name, pluginConfig))
+	}
+	return options
 }
 
 func get(t *testing.T, h http.Handler, target string) *httptest.ResponseRecorder {
@@ -157,14 +152,11 @@ func srcOf(t *testing.T, body string) string {
 	return m[1]
 }
 
-func allow(srv *httptest.Server) []optiimage.Origin {
-	u, _ := url.Parse(srv.URL)
-	return []optiimage.Origin{{Scheme: u.Scheme, Host: u.Host}}
-}
+func allow(srv *httptest.Server) []string { return []string{srv.URL} }
 
 func TestPlugin_RewritesAndServesADeclaredSizeImage(t *testing.T) {
 	o, srv := newOrigin(t, 400, 300)
-	site := newSite(t, optiimage.Config{AllowedOrigins: allow(srv)},
+	site := newSite(t, optiimage.Options{AllowedOrigins: allow(srv)},
 		`<img src="`+srv.URL+`/photo.png" width="200" height="150" alt="x">`)
 
 	body := get(t, site, "/gallery").Body.String()
@@ -198,7 +190,7 @@ func TestPlugin_RewritesAndServesADeclaredSizeImage(t *testing.T) {
 // origin as "&" and a fragment, and a CMS cover whose path has a "+" is a 404.
 func TestPlugin_DecodesTheSrcBeforeFetchingIt(t *testing.T) {
 	o, srv := newOrigin(t, 400, 300)
-	site := newSite(t, optiimage.Config{AllowedOrigins: allow(srv)},
+	site := newSite(t, optiimage.Options{AllowedOrigins: allow(srv)},
 		`<img src="`+srv.URL+`/a&#43;b.jpg" width="200" height="150">`)
 
 	src := srcOf(t, get(t, site, "/gallery").Body.String())
@@ -214,7 +206,7 @@ func TestPlugin_DecodesTheSrcBeforeFetchingIt(t *testing.T) {
 // the attribute it is written into.
 func TestPlugin_EscapesTheRewrittenSrc(t *testing.T) {
 	_, srv := newOrigin(t, 400, 300)
-	site := newSite(t, optiimage.Config{AllowedOrigins: allow(srv), Prefix: `/img&"x/`},
+	site := newSite(t, optiimage.Options{AllowedOrigins: allow(srv), Prefix: `/img&"x/`},
 		`<img src="`+srv.URL+`/a.png" width="200" height="150" alt="kept">`)
 
 	body := get(t, site, "/gallery").Body.String()
@@ -234,7 +226,7 @@ func TestPlugin_IgnoresImagesWithoutBothDimensions(t *testing.T) {
 		`<img src="` + srv.URL + `/a.png">`,
 		`<img src="` + srv.URL + `/a.png" width="100%" height="50">`,
 	} {
-		site := newSite(t, optiimage.Config{AllowedOrigins: allow(srv)}, tag)
+		site := newSite(t, optiimage.Options{AllowedOrigins: allow(srv)}, tag)
 		if src := srcOf(t, get(t, site, "/gallery").Body.String()); strings.HasPrefix(src, "/_image/") {
 			t.Errorf("%s was rewritten; without both pixel dimensions the target size is a guess", tag)
 		}
@@ -243,7 +235,7 @@ func TestPlugin_IgnoresImagesWithoutBothDimensions(t *testing.T) {
 
 func TestPlugin_IgnoresImagesFromOtherOrigins(t *testing.T) {
 	_, srv := newOrigin(t, 40, 30)
-	site := newSite(t, optiimage.Config{AllowedOrigins: allow(srv)},
+	site := newSite(t, optiimage.Options{AllowedOrigins: allow(srv)},
 		`<img src="https://elsewhere.example/a.png" width="20" height="10">`)
 
 	if src := srcOf(t, get(t, site, "/gallery").Body.String()); src != "https://elsewhere.example/a.png" {
@@ -256,7 +248,7 @@ func TestPlugin_UserinfoCannotForgeAnAllowedOrigin(t *testing.T) {
 	// with the allowed host as a string. A prefix check on the raw URL allows it.
 	_, srv := newOrigin(t, 40, 30)
 	u, _ := url.Parse(srv.URL)
-	site := newSite(t, optiimage.Config{AllowedOrigins: allow(srv)},
+	site := newSite(t, optiimage.Options{AllowedOrigins: allow(srv)},
 		`<img src="`+u.Scheme+`://`+u.Host+`@evil.example/a.png" width="20" height="10">`)
 
 	if src := srcOf(t, get(t, site, "/gallery").Body.String()); strings.HasPrefix(src, "/_image/") {
@@ -266,7 +258,7 @@ func TestPlugin_UserinfoCannotForgeAnAllowedOrigin(t *testing.T) {
 
 func TestPlugin_ServesFromCacheOnTheSecondRequest(t *testing.T) {
 	o, srv := newOrigin(t, 400, 300)
-	site := newSite(t, optiimage.Config{AllowedOrigins: allow(srv)},
+	site := newSite(t, optiimage.Options{AllowedOrigins: allow(srv)},
 		`<img src="`+srv.URL+`/a.png" width="200" height="150">`)
 
 	src := srcOf(t, get(t, site, "/gallery").Body.String())
@@ -293,7 +285,7 @@ func TestPlugin_ServesFromCacheOnTheSecondRequest(t *testing.T) {
 
 func TestPlugin_OriginFailuresDoNotTakeThePageDown(t *testing.T) {
 	_, srv := newOrigin(t, 40, 30)
-	site := newSite(t, optiimage.Config{AllowedOrigins: allow(srv)},
+	site := newSite(t, optiimage.Options{AllowedOrigins: allow(srv)},
 		`<img src="`+srv.URL+`/missing.png" width="20" height="10">`)
 
 	// The page itself renders: the rewrite does not fetch.
@@ -308,7 +300,7 @@ func TestPlugin_OriginFailuresDoNotTakeThePageDown(t *testing.T) {
 
 func TestPlugin_RefusesSomethingThatIsNotAnImage(t *testing.T) {
 	_, srv := newOrigin(t, 40, 30)
-	site := newSite(t, optiimage.Config{AllowedOrigins: allow(srv)},
+	site := newSite(t, optiimage.Options{AllowedOrigins: allow(srv)},
 		`<img src="`+srv.URL+`/notanimage.png" width="20" height="10">`)
 
 	src := srcOf(t, get(t, site, "/gallery").Body.String())
@@ -319,7 +311,7 @@ func TestPlugin_RefusesSomethingThatIsNotAnImage(t *testing.T) {
 
 func TestPlugin_RefusesAnOversizeSource(t *testing.T) {
 	_, srv := newOrigin(t, 400, 300)
-	site := newSite(t, optiimage.Config{AllowedOrigins: allow(srv), MaxSourceBytes: 64}, // smaller than the fixture
+	site := newSite(t, optiimage.Options{AllowedOrigins: allow(srv), MaxSourceBytes: 64}, // smaller than the fixture
 		`<img src="`+srv.URL+`/a.png" width="20" height="10">`)
 
 	src := srcOf(t, get(t, site, "/gallery").Body.String())
@@ -333,7 +325,7 @@ func TestPlugin_RefusesTooManyPixels(t *testing.T) {
 	// byte limit cannot see it, which is why the pixel limit is checked from the
 	// header before anything is decoded.
 	_, srv := newOrigin(t, 400, 300)
-	site := newSite(t, optiimage.Config{AllowedOrigins: allow(srv), MaxPixels: 100},
+	site := newSite(t, optiimage.Options{AllowedOrigins: allow(srv), MaxPixels: 100},
 		`<img src="`+srv.URL+`/a.png" width="20" height="10">`)
 
 	src := srcOf(t, get(t, site, "/gallery").Body.String())
@@ -346,7 +338,7 @@ func TestPlugin_DoesNothingWithNoAllowedOrigins(t *testing.T) {
 	// An empty allowlist must disable the plugin, never mean "any host". A fetcher
 	// defaulting to "anywhere" is an SSRF primitive wearing a feature's name.
 	_, srv := newOrigin(t, 40, 30)
-	site := newSite(t, optiimage.Config{}, `<img src="`+srv.URL+`/a.png" width="20" height="10">`)
+	site := newSite(t, optiimage.Options{}, `<img src="`+srv.URL+`/a.png" width="20" height="10">`)
 
 	if src := srcOf(t, get(t, site, "/gallery").Body.String()); strings.HasPrefix(src, "/_image/") {
 		t.Errorf("src = %q, want it left alone when nothing is allowed", src)
@@ -360,7 +352,7 @@ func TestPlugin_LeavesDataSrcAlone(t *testing.T) {
 	// "data-src=" contains "src=". Rewriting the wrong attribute breaks whatever
 	// lazy-loading script the page uses and leaves the real src untouched.
 	_, srv := newOrigin(t, 40, 30)
-	site := newSite(t, optiimage.Config{AllowedOrigins: allow(srv)},
+	site := newSite(t, optiimage.Options{AllowedOrigins: allow(srv)},
 		`<img data-src="`+srv.URL+`/a.png" width="20" height="10">`)
 
 	body := get(t, site, "/gallery").Body.String()
@@ -374,7 +366,7 @@ func TestPlugin_LeavesDataSrcAlone(t *testing.T) {
 // is nothing for a caller to point somewhere else.
 func TestPlugin_AnInventedNameIsNotFound(t *testing.T) {
 	o, srv := newOrigin(t, 40, 30)
-	site := newSite(t, optiimage.Config{AllowedOrigins: allow(srv)},
+	site := newSite(t, optiimage.Options{AllowedOrigins: allow(srv)},
 		`<img src="`+srv.URL+`/a.png" width="20" height="10">`)
 
 	// collage v0.24.0 redirects a path with dot segments to its clean spelling
@@ -405,7 +397,7 @@ func TestPlugin_NamesAreContentAddressed(t *testing.T) {
 	// honest: a name cannot come to mean different bytes.
 	_, srv := newOrigin(t, 400, 300)
 
-	same := newSite(t, optiimage.Config{AllowedOrigins: allow(srv)},
+	same := newSite(t, optiimage.Options{AllowedOrigins: allow(srv)},
 		`<img src="`+srv.URL+`/a.png" width="200" height="150">`+
 			`<img src="`+srv.URL+`/a.png" width="200" height="150">`)
 	body := get(t, same, "/gallery").Body.String()
@@ -417,7 +409,7 @@ func TestPlugin_NamesAreContentAddressed(t *testing.T) {
 		t.Errorf("one picture at one size produced two names: %q and %q", names[0][1], names[1][1])
 	}
 
-	other := newSite(t, optiimage.Config{AllowedOrigins: allow(srv)},
+	other := newSite(t, optiimage.Options{AllowedOrigins: allow(srv)},
 		`<img src="`+srv.URL+`/a.png" width="100" height="75">`)
 	if got := srcOf(t, get(t, other, "/gallery").Body.String()); got == names[0][1] {
 		t.Error("a different size produced the same name")
@@ -439,7 +431,7 @@ func mustJSON(t *testing.T, v any) json.RawMessage { // any: restates encoding/j
 // the process, and these are cached for a year.
 func TestPlugin_ProducedImagesCanBePurged(t *testing.T) {
 	o, srv := newOrigin(t, 400, 300)
-	p := optiimage.NewWith(optiimage.Config{AllowedOrigins: allow(srv), CacheDir: t.TempDir()})
+	p := optiimage.New(optiimage.Options{AllowedOrigins: allow(srv), CacheDir: t.TempDir()})
 	site := newSiteWith(t, p, `<img src="`+srv.URL+`/a.png" width="200" height="150">`)
 
 	src := srcOf(t, get(t, site, "/gallery").Body.String())
@@ -464,7 +456,7 @@ func TestPlugin_ProducedImagesCanBePurged(t *testing.T) {
 
 func TestPlugin_OneSourceCanBePurgedAlone(t *testing.T) {
 	o, srv := newOrigin(t, 400, 300)
-	p := optiimage.NewWith(optiimage.Config{AllowedOrigins: allow(srv), CacheDir: t.TempDir()})
+	p := optiimage.New(optiimage.Options{AllowedOrigins: allow(srv), CacheDir: t.TempDir()})
 	site := newSiteWith(t, p,
 		`<img src="`+srv.URL+`/a.png" width="200" height="150">`+
 			`<img src="`+srv.URL+`/b.png" width="200" height="150">`)
@@ -490,10 +482,10 @@ func TestPlugin_OneSourceCanBePurgedAlone(t *testing.T) {
 	}
 }
 
-// NewWith is a starting point the JSON configuration is decoded over: a key the
+// New's options are a starting point the JSON configuration is decoded over: a key the
 // JSON has replaces the value entirely — an allowedOrigins array is not merged
-// with NewWith's — and a key it lacks leaves NewWith's value alone.
-func TestNewWith_TheJSONReplacesWhatItNamesAndKeepsTheRest(t *testing.T) {
+// with New's — and a key it lacks leaves New's value alone.
+func TestNew_TheJSONReplacesWhatItNamesAndKeepsTheRest(t *testing.T) {
 	_, fromGo := newOrigin(t, 40, 30)
 	_, fromJSON := newOrigin(t, 40, 30)
 	markup := `<img src="` + fromGo.URL + `/a.png" width="20" height="10">` +
@@ -507,34 +499,74 @@ func TestNewWith_TheJSONReplacesWhatItNamesAndKeepsTheRest(t *testing.T) {
 	}
 
 	replaced := newSiteConfigured(t,
-		optiimage.NewWith(optiimage.Config{AllowedOrigins: allow(fromGo), CacheDir: t.TempDir()}),
-		mustJSON(t, map[string][]optiimage.Origin{"allowedOrigins": allow(fromJSON)}), markup)
+		optiimage.New(optiimage.Options{AllowedOrigins: allow(fromGo), CacheDir: t.TempDir()}),
+		string(mustJSON(t, map[string][]string{"allowedOrigins": allow(fromJSON)})), markup)
 	if got := rewritten(replaced); len(got) != 2 || got[0] || !got[1] {
 		t.Errorf("with allowedOrigins in the JSON, rewritten = %v, want [false true]", got)
 	}
 
 	kept := newSiteConfigured(t,
-		optiimage.NewWith(optiimage.Config{AllowedOrigins: allow(fromGo), CacheDir: t.TempDir()}),
-		json.RawMessage(`{"quality":60}`), markup)
+		optiimage.New(optiimage.Options{AllowedOrigins: allow(fromGo), CacheDir: t.TempDir()}),
+		`{"quality":60}`, markup)
 	if got := rewritten(kept); len(got) != 2 || !got[0] || got[1] {
 		t.Errorf("without allowedOrigins in the JSON, rewritten = %v, want [true false]", got)
 	}
 }
 
-// Decoding over NewWith's value must not write into the caller's slice.
+// Decoding over New's value must not write into the caller's slice.
 // encoding/json reuses a slice's backing array, so without a copy the JSON's
 // origins overwrote the ones the caller still held.
-func TestNewWith_DoesNotWriteIntoTheCallersOrigins(t *testing.T) {
+func TestNew_DoesNotWriteIntoTheCallersOrigins(t *testing.T) {
 	_, srv := newOrigin(t, 40, 30)
-	mine := []optiimage.Origin{
-		{Scheme: "https", Host: "mine.example"},
-		{Scheme: "https", Host: "also-mine.example"},
-	}
+	mine := []string{"https://mine.example", "https://also-mine.example"}
 	newSiteConfigured(t,
-		optiimage.NewWith(optiimage.Config{AllowedOrigins: mine, CacheDir: t.TempDir()}),
-		mustJSON(t, map[string][]optiimage.Origin{"allowedOrigins": allow(srv)}), `<p></p>`)
+		optiimage.New(optiimage.Options{AllowedOrigins: mine, CacheDir: t.TempDir()}),
+		string(mustJSON(t, map[string][]string{"allowedOrigins": allow(srv)})), `<p></p>`)
 
-	if mine[0].Host != "mine.example" {
+	if mine[0] != "https://mine.example" {
 		t.Errorf("the caller's origins were overwritten: %v", mine)
 	}
+}
+
+// allowedOrigins is a list of origin strings, each checked as collage checks an
+// origin; the {scheme, host} objects of v0.3 and a bare number for a duration
+// stop the application, naming the key.
+func TestConfig_RefusedAtStart(t *testing.T) {
+	for config, key := range map[string]string{
+		`{"allowedOrigins": [{"scheme": "https", "host": "img.example"}]}`: "allowedOrigins",
+		`{"allowedOrigins": ["img.example"]}`:                              "img.example",
+		`{"allowedOrigins": ["https://:8080"]}`:                            "https://:8080",
+		`{"allowedOrigins": ["https://img.example/path"]}`:                 "img.example/path",
+		`{"allowedOrigins": ["ftp://img.example"]}`:                        "ftp://img.example",
+		`{"fetchTimeout": 10}`:                                             "fetchTimeout",
+		`{"maxSourceBytes": -1}`:                                           "maxSourceBytes",
+		`{"maxPixels": -1}`:                                                "maxPixels",
+		`{"cacheBytes": -1}`:                                               "cacheBytes",
+		`{"quality": -1}`:                                                  "quality",
+		`{"quality": 101}`:                                                 "quality",
+	} {
+		_, err := collagetest.TrySite(t, siteOptions(optiimage.New(optiimage.Options{CacheDir: t.TempDir()}), config, `<p></p>`)...)
+		if err == nil || !strings.Contains(err.Error(), key) {
+			t.Errorf("%s: start = %v, want an error naming %s", config, err, key)
+		}
+	}
+}
+
+// A trailing slash on an allowed origin is the same origin.
+func TestConfig_AllowedOriginWithTrailingSlash(t *testing.T) {
+	_, srv := newOrigin(t, 40, 30)
+	site := newSite(t, optiimage.Options{AllowedOrigins: []string{srv.URL + "/"}}, `<img src="`+srv.URL+`/a.png" width="20" height="10">`)
+	if src := srcOf(t, get(t, site, "/gallery").Body.String()); !strings.HasPrefix(src, "/_image/") {
+		t.Errorf("src = %q, want a rewritten image", src)
+	}
+}
+
+// templateFS is templates as a filesystem, for a test that builds its own
+// application.
+func templateFS() fstest.MapFS {
+	fsys := fstest.MapFS{}
+	for name, source := range templates {
+		fsys[name] = &fstest.MapFile{Data: []byte(source)}
+	}
+	return fsys
 }

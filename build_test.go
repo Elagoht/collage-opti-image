@@ -29,8 +29,8 @@ func TestPlugin_StaticBuildWritesTheImages(t *testing.T) {
 
 	app, err := collage.New(&collage.Config{
 		Logger:   slog.New(slog.NewTextHandler(io.Discard, nil)),
-		Template: collage.TemplateConfig{FS: templates, Extension: ".html"},
-		Plugins:  []collage.Plugin{optiimage.NewWith(optiimage.Config{AllowedOrigins: allow(srv), CacheDir: t.TempDir()})},
+		Template: collage.TemplateConfig{FS: templateFS(), Extension: ".html"},
+		Plugins:  []collage.Plugin{optiimage.New(optiimage.Options{AllowedOrigins: allow(srv), CacheDir: t.TempDir()})},
 	})
 	if err != nil {
 		t.Fatalf("New: %v", err)
@@ -87,8 +87,8 @@ func TestPlugin_StaticBuildWritesNoImagesWhenNoneAreUsed(t *testing.T) {
 
 	app, err := collage.New(&collage.Config{
 		Logger:   slog.New(slog.NewTextHandler(io.Discard, nil)),
-		Template: collage.TemplateConfig{FS: templates, Extension: ".html"},
-		Plugins:  []collage.Plugin{optiimage.NewWith(optiimage.Config{AllowedOrigins: allow(srv), CacheDir: t.TempDir()})},
+		Template: collage.TemplateConfig{FS: templateFS(), Extension: ".html"},
+		Plugins:  []collage.Plugin{optiimage.New(optiimage.Options{AllowedOrigins: allow(srv), CacheDir: t.TempDir()})},
 	})
 	if err != nil {
 		t.Fatalf("New: %v", err)

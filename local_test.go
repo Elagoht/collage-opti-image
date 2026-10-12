@@ -39,7 +39,7 @@ func staticFiles(files fstest.MapFS) map[string]fs.FS {
 // resized, with no origin configured and nothing fetched.
 func TestPlugin_ResizesALocalFile(t *testing.T) {
 	files := fstest.MapFS{"icons/avatar.png": {Data: pngOf(t, 512, 512, red)}}
-	site := newSite(t, optiimage.Config{Files: staticFiles(files)},
+	site := newSite(t, optiimage.Options{Files: staticFiles(files)},
 		`<img src="/static/icons/avatar.png" width="64" height="64" alt="me">`)
 
 	src := srcOf(t, get(t, site, "/gallery").Body.String())
@@ -68,7 +68,7 @@ func TestPlugin_ALocalFileNamesItsContent(t *testing.T) {
 	body := `<img src="/static/a.png" width="10" height="10">`
 	name := func(c color.NRGBA) string {
 		files := fstest.MapFS{"a.png": {Data: pngOf(t, 20, 20, c)}}
-		return srcOf(t, get(t, newSite(t, optiimage.Config{Files: staticFiles(files)}, body), "/gallery").Body.String())
+		return srcOf(t, get(t, newSite(t, optiimage.Options{Files: staticFiles(files)}, body), "/gallery").Body.String())
 	}
 	if first, second := name(red), name(red); first != second {
 		t.Errorf("one file produced two names: %s and %s", first, second)
@@ -86,7 +86,7 @@ func TestPlugin_LocalPathsStayInTheirFilesystem(t *testing.T) {
 		"/static/../a.png", "/static/./a.png", "/static//a.png", "//static/a.png",
 		"/other/a.png", "/static/", "/static/missing.png", "static/a.png",
 	} {
-		site := newSite(t, optiimage.Config{Files: staticFiles(files)}, `<img src="`+src+`" width="10" height="10">`)
+		site := newSite(t, optiimage.Options{Files: staticFiles(files)}, `<img src="`+src+`" width="10" height="10">`)
 		if got := srcOf(t, get(t, site, "/gallery").Body.String()); got != src {
 			t.Errorf("src %q became %q, want it left alone", src, got)
 		}
@@ -99,10 +99,10 @@ func TestPlugin_LocalPathsStayInTheirFilesystem(t *testing.T) {
 func TestPlugin_AChangedLocalFileIsNotServedUnderItsOldName(t *testing.T) {
 	dir := t.TempDir()
 	body := `<img src="/static/a.png" width="10" height="10">`
-	before := newSite(t, optiimage.Config{CacheDir: dir, Files: staticFiles(fstest.MapFS{"a.png": {Data: pngOf(t, 20, 20, red)}})}, body)
+	before := newSite(t, optiimage.Options{CacheDir: dir, Files: staticFiles(fstest.MapFS{"a.png": {Data: pngOf(t, 20, 20, red)}})}, body)
 	old := srcOf(t, get(t, before, "/gallery").Body.String())
 
-	after := newSite(t, optiimage.Config{CacheDir: dir, Files: staticFiles(fstest.MapFS{"a.png": {Data: pngOf(t, 20, 20, color.NRGBA{G: 255, A: 255})}})}, body)
+	after := newSite(t, optiimage.Options{CacheDir: dir, Files: staticFiles(fstest.MapFS{"a.png": {Data: pngOf(t, 20, 20, color.NRGBA{G: 255, A: 255})}})}, body)
 	if rec := get(t, after, old); rec.Code == http.StatusOK {
 		t.Errorf("GET %s = 200 with the changed file's content, want a refusal", old)
 	}

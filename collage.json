@@ -3,24 +3,16 @@
   "name": "elagoht/opti-image",
   "description": "A collage plugin that rewrites images declaring a width and a height to resized copies it serves itself.",
   "repository": "https://github.com/Elagoht/collage-opti-image",
+  "setup": "Nothing is resized until a source is named: list the origins images may be fetched from in `\"allowedOrigins\"` (such as `[\"https://cms.example.com\"]`) in this plugin's section of `plugins-config.json`, or give the site's own image directories as `Files` to `optiimage.New(optiimage.Options{Files: ...})` in `plugins.go`.",
   "config": {
     "type": "object",
     "description": "A collage plugin that rewrites images declaring a width and a height to resized copies it serves itself.",
     "properties": {
       "allowedOrigins": {
         "type": "array",
-        "description": "AllowedOrigins is the set of hosts images may be fetched from. An empty list disables the plugin entirely rather than allowing everything: a fetcher that defaults to \"any host\" is an SSRF primitive wearing a feature's name.",
+        "description": "AllowedOrigins is the set of origins images may be fetched from, each \"scheme://host[:port]\": [\"https://cms.example.com\"]. Each is checked with collage.ParseOrigin, so a path, a missing host or a scheme other than http or https stops the application. The scheme is part of it, not an afterthought: allowing \"example.com\" without saying which scheme allows a plaintext fetch of an image the page will serve over TLS. An empty list disables fetching entirely rather than allowing everything: a fetcher that defaults to \"any host\" is an SSRF primitive wearing a feature's name.",
         "items": {
-          "type": "object",
-          "properties": {
-            "host": {
-              "type": "string"
-            },
-            "scheme": {
-              "type": "string"
-            }
-          },
-          "additionalProperties": false
+          "type": "string"
         }
       },
       "alphaThreshold": {
@@ -29,7 +21,7 @@
       },
       "cacheBytes": {
         "type": "integer",
-        "description": "CacheBytes caps the memory held by resized images. Defaults to 64 MiB."
+        "description": "CacheBytes caps the memory held by resized images. Defaults to 64 MiB; negative is an error."
       },
       "cacheDir": {
         "type": "string",
@@ -40,49 +32,33 @@
         "description": "Disabled turns the plugin off without removing it from the application."
       },
       "fetchTimeout": {
-        "description": "FetchTimeout bounds a single origin fetch. Defaults to 10s. In JSON it is written the way a person writes a duration — \"10s\", \"500ms\" — as well as as a number of nanoseconds. See Duration.",
-        "anyOf": [
-          {
-            "type": "string",
-            "pattern": "^(\\d+(\\.\\d+)?(ns|us|µs|ms|s|m|h))+$",
-            "examples": [
-              "30s",
-              "5m"
-            ]
-          },
-          {
-            "type": "integer",
-            "description": "nanoseconds"
-          }
+        "type": "string",
+        "description": "FetchTimeout bounds a single origin fetch. Defaults to 10s. In JSON it is a duration string, \"10s\" or \"500ms\"; a bare number is refused.",
+        "pattern": "^(\\d+(\\.\\d+)?(ns|us|µs|ms|s|m|h))+$",
+        "examples": [
+          "30s",
+          "5m"
         ]
       },
       "maxPixels": {
         "type": "integer",
-        "description": "MaxPixels refuses an origin image with more pixels than this, before it is decoded. Defaults to 40 million. A small file can decode to an enormous bitmap — the decompression bomb — and the byte limit above does not see it."
+        "description": "MaxPixels refuses an origin image with more pixels than this, before it is decoded. Defaults to 40 million; negative is an error. A small file can decode to an enormous bitmap — the decompression bomb — and the byte limit above does not see it."
       },
       "maxSourceBytes": {
         "type": "integer",
-        "description": "MaxSourceBytes refuses an origin image larger than this. Defaults to 8 MiB. Without it, one hostile or careless origin can exhaust the process's memory."
+        "description": "MaxSourceBytes refuses an origin image larger than this. Defaults to 8 MiB; negative is an error. Without it, one hostile or careless origin can exhaust the process's memory."
       },
       "noDiskCache": {
         "type": "boolean",
         "description": "NoDiskCache keeps produced images in memory only, so nothing is written anywhere. A read-only deployment does not need this — a directory that cannot be created or written to disables the disk cache by itself, with one line in the log — but a deployment that would rather not write at all can say so."
       },
       "originMaxAge": {
-        "description": "OriginMaxAge is how long a browser or CDN may keep an image fetched from an origin before asking again: its Cache-Control is \"public, max-age=\" this, in seconds, and never immutable. Defaults to 24h; at least 1s. An origin's image is named by its recipe — URL, size, format — not by its content, so the origin can change it under the same name, and a mistake fixed there reaches readers within this time. Images of the site's own Files have their content in their name and are served for a year, immutable. Written like FetchTimeout: \"24h\", \"30m\", or nanoseconds.",
-        "anyOf": [
-          {
-            "type": "string",
-            "pattern": "^(\\d+(\\.\\d+)?(ns|us|µs|ms|s|m|h))+$",
-            "examples": [
-              "30s",
-              "5m"
-            ]
-          },
-          {
-            "type": "integer",
-            "description": "nanoseconds"
-          }
+        "type": "string",
+        "description": "OriginMaxAge is how long a browser or CDN may keep an image fetched from an origin before asking again: its Cache-Control is \"public, max-age=\" this, in seconds, and never immutable. Defaults to 24h; at least 1s. An origin's image is named by its recipe — URL, size, format — not by its content, so the origin can change it under the same name, and a mistake fixed there reaches readers within this time. Images of the site's own Files have their content in their name and are served for a year, immutable. Written like FetchTimeout: \"24h\", \"30m\".",
+        "pattern": "^(\\d+(\\.\\d+)?(ns|us|µs|ms|s|m|h))+$",
+        "examples": [
+          "30s",
+          "5m"
         ]
       },
       "prefix": {
@@ -91,7 +67,7 @@
       },
       "quality": {
         "type": "integer",
-        "description": "Quality is the JPEG quality of re-encoded images, 1..100. Defaults to 82."
+        "description": "Quality is the JPEG quality of re-encoded images, 1..100. Defaults to 82; anything outside 0..100 is an error."
       },
       "webp": {
         "description": "WebP says which images are re-encoded to WebP: none, all, or — \"auto\" — only those that would otherwise be lossless. See WebPMode.",

@@ -57,7 +57,7 @@ func TestEncode_JPEGShowsTranslucentPixelsInTheirOwnColour(t *testing.T) {
 	for i := 0; i < len(img.Pix); i += 4 {
 		copy(img.Pix[i:], []byte{200, 40, 40, 128})
 	}
-	out, err := (&Plugin{cfg: Config{Quality: 90}}).encode(img, formatJPEG)
+	out, err := (&Plugin{cfg: Options{Quality: 90}}).encode(img, formatJPEG)
 	if err != nil {
 		t.Fatalf("encode: %v", err)
 	}
@@ -98,7 +98,7 @@ func TestRecipe_TheThresholdIsInAnAutoName(t *testing.T) {
 
 func TestConfig_AlphaThresholdIsAShare(t *testing.T) {
 	for _, bad := range []float64{-0.1, 1, 2} {
-		c := Config{AlphaThreshold: bad}.withDefaults()
+		c := Options{AlphaThreshold: bad}.withDefaults()
 		if err := c.validate(); err == nil || !strings.Contains(err.Error(), "alphaThreshold") {
 			t.Errorf("AlphaThreshold %v: validate() = %v, want it refused", bad, err)
 		}

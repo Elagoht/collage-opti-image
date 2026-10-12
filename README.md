@@ -5,12 +5,12 @@ copies it serves itself.
 
 ```go
 app, err := collage.New(&collage.Config{
-	Plugins:      []collage.Plugin{optiimage.New()},
-	PluginConfig: cfg,
+	Plugins: []collage.Plugin{optiimage.New(optiimage.Options{})},
+	PluginConfig: cfg, // names "allowedOrigins", or Options.Files a filesystem
 })
 ```
 
-It must be supplied through `Config.Plugins`: it registers the routes it serves
+Requires collage v0.61.0 or later. It must be supplied through `Config.Plugins`: it registers the routes it serves
 images from, and that happens while the application is built.
 
 ## Configuration
@@ -18,9 +18,7 @@ images from, and that happens while the application is built.
 ```json
 {
   "elagoht/opti-image": {
-    "allowedOrigins": [
-      { "scheme": "https", "host": "images.example.com" }
-    ],
+    "allowedOrigins": ["https://images.example.com"],
     "prefix": "/_image/",
     "maxSourceBytes": 8388608,
     "maxPixels": 40000000,
@@ -32,25 +30,31 @@ images from, and that happens while the application is built.
 }
 ```
 
-### `NewWith` and the JSON
+Each origin is `scheme://host[:port]`, checked as collage checks an origin
+(`collage.ParseOrigin`): a path, a missing host or a scheme other than `http` or
+`https` stops the application. Durations are strings such as `"10s"`; a bare
+number is refused. A negative number is refused too; `0`, or leaving a key out,
+means its default.
 
-`NewWith(optiimage.Config{...})` sets a starting point, and the application's JSON
+### `New` and the JSON
+
+`New(optiimage.Options{...})` sets a starting point, and the application's JSON
 configuration is decoded over it, key by key:
 
 - **a key the JSON has replaces the value entirely.** Arrays are not merged: with
-  `NewWith(Config{AllowedOrigins: a})` and `"allowedOrigins": [b]` in the JSON, the
+  `New(Options{AllowedOrigins: a})` and `"allowedOrigins": [b]` in the JSON, the
   plugin allows `b` and not `a`.
-- **a key the JSON lacks leaves the `NewWith` value.** With `"quality": 60` and no
+- **a key the JSON lacks leaves the `New` value.** With `"quality": 60` and no
   `allowedOrigins` in the JSON, the plugin allows `a` at quality 60.
-- **with no `"elagoht/opti-image"` entry at all,** the `NewWith` value is the whole
+- **with no `"elagoht/opti-image"` entry at all,** the `New` value is the whole
   configuration.
 
 Defaults are filled in afterwards, for whatever is still unset either way. The slice
 you pass is copied, so decoding never writes into it.
 
 ```go
-optiimage.NewWith(optiimage.Config{
-	AllowedOrigins: []optiimage.Origin{{Scheme: "https", Host: "cms.example.com"}},
+optiimage.New(optiimage.Options{
+	AllowedOrigins: []string{"https://cms.example.com"},
 	WebP:           optiimage.WebPAuto,
 })
 ```
@@ -68,8 +72,8 @@ An image the site serves itself needs no origin and no request to itself. `Files
 maps a URL path prefix to the filesystem the images under it are read from:
 
 ```go
-optiimage.NewWith(optiimage.Config{
-	AllowedOrigins: []optiimage.Origin{{Scheme: "https", Host: "cms.example.com"}},
+optiimage.New(optiimage.Options{
+	AllowedOrigins: []string{"https://cms.example.com"},
 	Files:          map[string]fs.FS{"/static/": staticFS}, // what app.Mount("/static/", staticFS) serves
 })
 ```
@@ -352,7 +356,7 @@ these. The plugin holds them itself, bounded by `cacheBytes`, and purging is a
 method:
 
 ```go
-p := optiimage.New()
+p := optiimage.New(optiimage.Options{})
 // ...
 p.Purge()                  // every produced image
 p.PurgeSource(imageURL)    // one origin image, at every size
@@ -369,6 +373,24 @@ process; a reader who already has the wrong one keeps it for at most
 `originMaxAge`.
 
 ## Changes
+
+### Changed in v0.4.0
+
+- One constructor: `optiimage.New()` → `optiimage.New(optiimage.Options{})`, and
+  `optiimage.NewWith(optiimage.Config{…})` → `optiimage.New(optiimage.Options{…})`.
+  The type `Config` is now `Options`.
+- `allowedOrigins` is a list of origin strings: write
+  `"allowedOrigins": ["https://cms.example.com"]` instead of
+  `[{"scheme": "https", "host": "cms.example.com"}]`, and in Go
+  `[]string{"https://cms.example.com"}` instead of `[]optiimage.Origin{…}`.
+  The `Origin` type is removed; each entry is checked with `collage.ParseOrigin`.
+- `fetchTimeout` and `originMaxAge` are `collage.Duration`: write `"10s"`. A bare
+  number, which used to mean nanoseconds (`"fetchTimeout": 10` timed out every
+  fetch), now stops the application, naming the key. `optiimage.Duration` is
+  removed.
+- `maxSourceBytes`, `maxPixels`, `cacheBytes` and `quality` refuse a negative
+  value, and `quality` one above 100, instead of falling back to the default.
+- Requires collage v0.61.0.
 
 ### v0.3.6
 

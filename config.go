@@ -8,27 +8,25 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/Elagoht/collage/pkg/collage"
 )
 
 // Name is the plugin's name, and the key its configuration is found under.
 const Name = "elagoht/opti-image"
 
-// Origin is one host the plugin is allowed to fetch from.
-//
-// Scheme is part of it, not an afterthought: allowing "example.com" without saying
-// which scheme allows a plaintext fetch of an image the page will serve over TLS,
-// which is a mixed-content warning at best and a tampering opportunity at worst.
-type Origin struct {
-	Scheme string `json:"scheme"`
-	Host   string `json:"host"`
-}
-
-// Config is the plugin's configuration.
-type Config struct {
-	// AllowedOrigins is the set of hosts images may be fetched from. An empty list
-	// disables the plugin entirely rather than allowing everything: a fetcher that
+// Options configures the plugin. Its section of the application's plugin
+// configuration is decoded over it.
+type Options struct {
+	// AllowedOrigins is the set of origins images may be fetched from, each
+	// "scheme://host[:port]": ["https://cms.example.com"]. Each is checked with
+	// collage.ParseOrigin, so a path, a missing host or a scheme other than http
+	// or https stops the application. The scheme is part of it, not an
+	// afterthought: allowing "example.com" without saying which scheme allows a
+	// plaintext fetch of an image the page will serve over TLS. An empty list
+	// disables fetching entirely rather than allowing everything: a fetcher that
 	// defaults to "any host" is an SSRF primitive wearing a feature's name.
-	AllowedOrigins []Origin `json:"allowedOrigins"`
+	AllowedOrigins []string `json:"allowedOrigins"`
 
 	// Files maps a URL path prefix to the filesystem the site's own images under
 	// it are read from: {"/static/": staticFS} makes <img src="/static/avatar.png"
@@ -41,18 +39,17 @@ type Config struct {
 	// Prefix is the URL prefix optimised images are served under. It must begin
 	// and end with "/". Defaults to "/_image/".
 	Prefix string `json:"prefix"`
-	// MaxSourceBytes refuses an origin image larger than this. Defaults to 8 MiB.
+	// MaxSourceBytes refuses an origin image larger than this. Defaults to 8 MiB;
+	// negative is an error.
 	// Without it, one hostile or careless origin can exhaust the process's memory.
 	MaxSourceBytes int64 `json:"maxSourceBytes"`
 	// MaxPixels refuses an origin image with more pixels than this, before it is
-	// decoded. Defaults to 40 million. A small file can decode to an enormous
+	// decoded. Defaults to 40 million; negative is an error. A small file can decode to an enormous
 	// bitmap — the decompression bomb — and the byte limit above does not see it.
 	MaxPixels int `json:"maxPixels"`
-	// FetchTimeout bounds a single origin fetch. Defaults to 10s.
-	//
-	// In JSON it is written the way a person writes a duration — "10s", "500ms" —
-	// as well as as a number of nanoseconds. See Duration.
-	FetchTimeout Duration `json:"fetchTimeout"`
+	// FetchTimeout bounds a single origin fetch. Defaults to 10s. In JSON it is a
+	// duration string, "10s" or "500ms"; a bare number is refused.
+	FetchTimeout collage.Duration `json:"fetchTimeout"`
 	// OriginMaxAge is how long a browser or CDN may keep an image fetched from an
 	// origin before asking again: its Cache-Control is "public, max-age=" this, in
 	// seconds, and never immutable. Defaults to 24h; at least 1s. An origin's image
@@ -60,9 +57,10 @@ type Config struct {
 	// origin can change it under the same name, and a mistake fixed there reaches
 	// readers within this time. Images of the site's own Files have their content
 	// in their name and are served for a year, immutable. Written like
-	// FetchTimeout: "24h", "30m", or nanoseconds.
-	OriginMaxAge Duration `json:"originMaxAge"`
-	// CacheBytes caps the memory held by resized images. Defaults to 64 MiB.
+	// FetchTimeout: "24h", "30m".
+	OriginMaxAge collage.Duration `json:"originMaxAge"`
+	// CacheBytes caps the memory held by resized images. Defaults to 64 MiB;
+	// negative is an error.
 	CacheBytes int64 `json:"cacheBytes"`
 	// CacheDir is where produced images are kept between restarts. An empty value
 	// means ".cache/opti-image", relative to the working directory.
@@ -78,7 +76,8 @@ type Config struct {
 	// be created or written to disables the disk cache by itself, with one line in
 	// the log — but a deployment that would rather not write at all can say so.
 	NoDiskCache bool `json:"noDiskCache"`
-	// Quality is the JPEG quality of re-encoded images, 1..100. Defaults to 82.
+	// Quality is the JPEG quality of re-encoded images, 1..100. Defaults to 82;
+	// anything outside 0..100 is an error.
 	Quality int `json:"quality"`
 	// WebP says which images are re-encoded to WebP: none, all, or — "auto" — only
 	// those that would otherwise be lossless. See WebPMode.
@@ -98,44 +97,56 @@ type Config struct {
 	Disabled bool `json:"disabled"`
 }
 
-// withDefaults returns cfg with every unset field filled in.
-func (c Config) withDefaults() Config {
+// withDefaults returns c with every unset field filled in. A negative value is
+// left for validate to refuse.
+func (c Options) withDefaults() Options {
 	if c.Prefix == "" {
 		c.Prefix = "/_image/"
 	}
-	if c.MaxSourceBytes <= 0 {
+	if c.MaxSourceBytes == 0 {
 		c.MaxSourceBytes = 8 << 20
 	}
-	if c.MaxPixels <= 0 {
+	if c.MaxPixels == 0 {
 		c.MaxPixels = 40_000_000
 	}
-	if c.FetchTimeout <= 0 {
-		c.FetchTimeout = Duration(10 * time.Second)
+	if c.FetchTimeout == 0 {
+		c.FetchTimeout = collage.Duration(10 * time.Second)
 	}
 	if c.OriginMaxAge == 0 {
-		c.OriginMaxAge = Duration(24 * time.Hour)
+		c.OriginMaxAge = collage.Duration(24 * time.Hour)
 	}
-	if c.CacheBytes <= 0 {
+	if c.CacheBytes == 0 {
 		c.CacheBytes = 64 << 20
 	}
 	if c.CacheDir == "" {
 		c.CacheDir = filepath.Join(".cache", "opti-image")
 	}
-	if c.Quality <= 0 || c.Quality > 100 {
+	if c.Quality == 0 {
 		c.Quality = 82
 	}
 	return c
 }
 
 // validate reports a configuration that cannot work.
-func (c Config) validate() error {
+func (c Options) validate() error {
+	for key, value := range map[string]int64{
+		"maxSourceBytes": c.MaxSourceBytes, "maxPixels": int64(c.MaxPixels),
+		"cacheBytes": c.CacheBytes, "fetchTimeout": int64(c.FetchTimeout),
+	} {
+		if value < 0 {
+			return fmt.Errorf("opti-image: %s %d is negative; leave it out for the default", key, value)
+		}
+	}
+	if c.Quality < 0 || c.Quality > 100 {
+		return fmt.Errorf("opti-image: quality %d must be from 1 to 100", c.Quality)
+	}
 	if !strings.HasPrefix(c.Prefix, "/") || !strings.HasSuffix(c.Prefix, "/") {
 		return fmt.Errorf("opti-image: prefix %q must begin and end with \"/\"", c.Prefix)
 	}
 	if c.Prefix == "/" {
 		return fmt.Errorf("opti-image: prefix must not be \"/\", which would claim the whole site")
 	}
-	if c.OriginMaxAge < Duration(time.Second) {
+	if c.OriginMaxAge < collage.Duration(time.Second) {
 		return fmt.Errorf("opti-image: originMaxAge %v must be at least 1s: max-age counts whole seconds", time.Duration(c.OriginMaxAge))
 	}
 	if c.AlphaThreshold < 0 || c.AlphaThreshold >= 1 {
@@ -147,11 +158,8 @@ func (c Config) validate() error {
 		}
 	}
 	for _, origin := range c.AllowedOrigins {
-		if origin.Host == "" {
-			return fmt.Errorf("opti-image: an allowed origin has no host")
-		}
-		if origin.Scheme != "http" && origin.Scheme != "https" {
-			return fmt.Errorf("opti-image: origin %q has scheme %q, want http or https", origin.Host, origin.Scheme)
+		if _, err := collage.ParseOrigin(origin); err != nil {
+			return fmt.Errorf("opti-image: allowedOrigins: %w", err)
 		}
 	}
 	return nil
@@ -165,13 +173,18 @@ func (c Config) validate() error {
 // for this purpose, so allowing "images.example.com" does not allow
 // "images.example.com:8080" — a different service on a different port is a
 // different origin, whatever the certificate says.
-func (c Config) allows(raw string) (*url.URL, bool) {
+func (c Options) allows(raw string) (*url.URL, bool) {
 	parsed, err := url.Parse(raw)
 	if err != nil || parsed.Host == "" {
 		return nil, false
 	}
 	for _, origin := range c.AllowedOrigins {
-		if parsed.Scheme == origin.Scheme && parsed.Host == origin.Host {
+		// validate has checked each with collage.ParseOrigin.
+		allowed, err := url.Parse(origin)
+		if err != nil {
+			continue
+		}
+		if parsed.Scheme == allowed.Scheme && strings.EqualFold(parsed.Host, allowed.Host) {
 			return parsed, true
 		}
 	}
@@ -182,7 +195,7 @@ func (c Config) allows(raw string) (*url.URL, bool) {
 // the filesystem and the file in it, and raw parsed. The longest prefix wins, and
 // a file name fs.ValidPath refuses — "..", an empty element — is no file, so
 // nothing outside the filesystem is reachable however the path is spelled.
-func (c Config) local(raw string) (fs.FS, string, *url.URL, bool) {
+func (c Options) local(raw string) (fs.FS, string, *url.URL, bool) {
 	if len(c.Files) == 0 || !strings.HasPrefix(raw, "/") || strings.HasPrefix(raw, "//") {
 		return nil, "", nil, false
 	}
@@ -204,44 +217,6 @@ func (c Config) local(raw string) (fs.FS, string, *url.URL, bool) {
 		return nil, "", nil, false
 	}
 	return c.Files[best], file, parsed, true
-}
-
-// Duration is a time.Duration that reads "10s" from JSON as well as a number.
-//
-// encoding/json unmarshals a time.Duration from a number of nanoseconds and from
-// nothing else, so a configuration file written by a person — which is what a
-// plugin configuration file is — fails on the only spelling that person was ever
-// going to use. "fetchTimeout": "10s" is what everybody writes; 10000000000 is what
-// nobody does.
-//
-// The number is still accepted, because a file written by a program is a file
-// somewhere, and refusing it would break it for the sake of tidiness.
-type Duration time.Duration
-
-// UnmarshalJSON accepts "10s" and 10000000000 alike.
-func (d *Duration) UnmarshalJSON(data []byte) error {
-	var asNumber int64
-	if err := json.Unmarshal(data, &asNumber); err == nil {
-		*d = Duration(asNumber)
-		return nil
-	}
-
-	var asText string
-	if err := json.Unmarshal(data, &asText); err != nil {
-		return fmt.Errorf("opti-image: a duration (fetchTimeout, originMaxAge) must be written like \"10s\", or as nanoseconds: %w", err)
-	}
-	parsed, err := time.ParseDuration(asText)
-	if err != nil {
-		return fmt.Errorf("opti-image: duration (fetchTimeout, originMaxAge) %q: %w", asText, err)
-	}
-	*d = Duration(parsed)
-	return nil
-}
-
-// MarshalJSON writes the form a person reads, so a configuration round-trips into
-// something still worth editing.
-func (d Duration) MarshalJSON() ([]byte, error) {
-	return json.Marshal(time.Duration(d).String())
 }
 
 // WebPMode says which images are re-encoded as WebP.

@@ -7,7 +7,7 @@ import (
 	"github.com/HugoSmits86/nativewebp"
 )
 
-// The encoder is linked unconditionally, and Config.WebP is the only switch.
+// The encoder is linked unconditionally, and Options.WebP is the only switch.
 //
 // It used to be behind a "webp" build tag, on the reasoning that a plugin should not
 // hand every application a dependency most of them will not use. That was the wrong
