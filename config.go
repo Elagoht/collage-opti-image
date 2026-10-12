@@ -178,23 +178,48 @@ func (c Options) validate() error {
 // is evil.example and whose prefix is the allowed one. The port is part of the host
 // for this purpose, so allowing "images.example.com" does not allow
 // "images.example.com:8080" — a different service on a different port is a
-// different origin, whatever the certificate says.
+// different origin, whatever the certificate says. The scheme's default port is
+// the same origin written or not: "https://cms.example.com:443" allows
+// "https://cms.example.com/x.jpg", and the other way round.
 func (c Options) allows(raw string) (*url.URL, bool) {
 	parsed, err := url.Parse(raw)
 	if err != nil || parsed.Host == "" {
 		return nil, false
 	}
+	want := originKey(parsed)
 	for _, origin := range c.AllowedOrigins {
-		// validate has checked each with collage.ParseOrigin.
-		allowed, err := url.Parse(origin)
+		// validate has checked each with collage.ParseOrigin; what it returns is
+		// the origin to compare with.
+		bare, err := collage.ParseOrigin(origin)
 		if err != nil {
 			continue
 		}
-		if parsed.Scheme == allowed.Scheme && strings.EqualFold(parsed.Host, allowed.Host) {
+		allowed, err := url.Parse(bare)
+		if err != nil {
+			continue
+		}
+		if originKey(allowed) == want {
 			return parsed, true
 		}
 	}
 	return nil, false
+}
+
+// originKey is u's origin for comparing: the scheme, the host in lower case, and
+// the port unless it is the scheme's default.
+func originKey(u *url.URL) string {
+	scheme, port := strings.ToLower(u.Scheme), u.Port()
+	if (scheme == "https" && port == "443") || (scheme == "http" && port == "80") {
+		port = ""
+	}
+	host := strings.ToLower(u.Hostname())
+	if strings.Contains(host, ":") {
+		host = "[" + host + "]"
+	}
+	if port != "" {
+		host += ":" + port
+	}
+	return scheme + "://" + host
 }
 
 // local reports whether raw is a path under one of Files' prefixes, and returns

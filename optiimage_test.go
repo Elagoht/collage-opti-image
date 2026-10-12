@@ -15,7 +15,6 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
-	"testing/fstest"
 
 	"github.com/Elagoht/collage/pkg/collage"
 	"github.com/Elagoht/collage/pkg/collagetest"
@@ -559,16 +558,6 @@ func TestConfig_AllowedOriginWithTrailingSlash(t *testing.T) {
 	if src := srcOf(t, get(t, site, "/gallery").Body.String()); !strings.HasPrefix(src, "/_image/") {
 		t.Errorf("src = %q, want a rewritten image", src)
 	}
-}
-
-// templateFS is templates as a filesystem, for a test that builds its own
-// application.
-func templateFS() fstest.MapFS {
-	fsys := fstest.MapFS{}
-	for name, source := range templates {
-		fsys[name] = &fstest.MapFile{Data: []byte(source)}
-	}
-	return fsys
 }
 
 // A host is compared without regard to case: an allowed origin written in lower

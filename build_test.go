@@ -3,8 +3,6 @@ package optiimage_test
 import (
 	"context"
 	"image"
-	"io"
-	"log/slog"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -12,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/Elagoht/collage/pkg/collage"
+	"github.com/Elagoht/collage/pkg/collagetest"
 
 	optiimage "github.com/Elagoht/collage-opti-image"
 )
@@ -27,14 +26,6 @@ import (
 func TestPlugin_StaticBuildWritesTheImages(t *testing.T) {
 	_, srv := newOrigin(t, 400, 300)
 
-	app, err := collage.New(&collage.Config{
-		Logger:   slog.New(slog.NewTextHandler(io.Discard, nil)),
-		Template: collage.TemplateConfig{FS: templateFS(), Extension: ".html"},
-		Plugins:  []collage.Plugin{optiimage.New(optiimage.Options{AllowedOrigins: allow(srv), CacheDir: t.TempDir()})},
-	})
-	if err != nil {
-		t.Fatalf("New: %v", err)
-	}
 	page := collage.NewPage("gallery").
 		WithContent(collage.NewFragment("gallery", "pages/gallery.html").
 			WithData(collage.Load(func(context.Context, *collage.RenderContext) (struct{ Body string }, error) {
@@ -45,9 +36,12 @@ func TestPlugin_StaticBuildWritesTheImages(t *testing.T) {
 		WithPath("en", "/gallery").
 		Static().
 		Build()
-	if err := app.RegisterPage(page); err != nil {
-		t.Fatalf("RegisterPage: %v", err)
-	}
+	app := collagetest.NewSite(t,
+		collagetest.WithPlugins(optiimage.New(optiimage.Options{AllowedOrigins: allow(srv), CacheDir: t.TempDir()})),
+		collagetest.WithTemplates(templates),
+		collagetest.WithoutHome(),
+		collagetest.WithRegister(page),
+	).App
 
 	out := t.TempDir()
 	report, err := collage.Build(context.Background(), app, collage.BuildOptions{OutDir: out})
@@ -85,14 +79,6 @@ func TestPlugin_StaticBuildWritesTheImages(t *testing.T) {
 func TestPlugin_StaticBuildWritesNoImagesWhenNoneAreUsed(t *testing.T) {
 	_, srv := newOrigin(t, 400, 300)
 
-	app, err := collage.New(&collage.Config{
-		Logger:   slog.New(slog.NewTextHandler(io.Discard, nil)),
-		Template: collage.TemplateConfig{FS: templateFS(), Extension: ".html"},
-		Plugins:  []collage.Plugin{optiimage.New(optiimage.Options{AllowedOrigins: allow(srv), CacheDir: t.TempDir()})},
-	})
-	if err != nil {
-		t.Fatalf("New: %v", err)
-	}
 	page := collage.NewPage("gallery").
 		WithContent(collage.NewFragment("gallery", "pages/gallery.html").
 			WithData(collage.Load(func(context.Context, *collage.RenderContext) (struct{ Body string }, error) {
@@ -101,9 +87,12 @@ func TestPlugin_StaticBuildWritesNoImagesWhenNoneAreUsed(t *testing.T) {
 		WithPath("en", "/gallery").
 		Static().
 		Build()
-	if err := app.RegisterPage(page); err != nil {
-		t.Fatalf("RegisterPage: %v", err)
-	}
+	app := collagetest.NewSite(t,
+		collagetest.WithPlugins(optiimage.New(optiimage.Options{AllowedOrigins: allow(srv), CacheDir: t.TempDir()})),
+		collagetest.WithTemplates(templates),
+		collagetest.WithoutHome(),
+		collagetest.WithRegister(page),
+	).App
 
 	out := t.TempDir()
 	if _, err := collage.Build(context.Background(), app, collage.BuildOptions{OutDir: out}); err != nil {

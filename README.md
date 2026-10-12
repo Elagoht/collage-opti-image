@@ -32,7 +32,10 @@ images from, and that happens while the application is built.
 
 Each origin is `scheme://host[:port]`, checked as collage checks an origin
 (`collage.ParseOrigin`): a path, a missing host or a scheme other than `http` or
-`https` stops the application. Durations are strings such as `"10s"`; a bare
+`https` stops the application. An image matches an origin by scheme, host
+(in any case) and port, the scheme's default port written or not:
+`https://cms.example.com:443` allows `https://cms.example.com/x.jpg`, and
+`https://cms.example.com:8443` is another origin. Durations are strings such as `"10s"`; a bare
 number is refused. A negative number is refused too; `0`, or leaving a key out,
 means its default.
 
@@ -372,9 +375,14 @@ are named by their recipe, so without this the only fix would be restarting the
 process; a reader who already has the wrong one keeps it for at most
 `originMaxAge`.
 
-## Changes
+## Changed in v0.4.1
 
-### Changed in v0.4.0
+- Fixed: an allowed origin that spells its scheme's default port,
+  `https://cms.example.com:443`, was accepted at start but matched no image;
+  the default port now matches whether either side writes it. Requires collage
+  v0.61.2.
+
+## Changed in v0.4.0
 
 - One constructor: `optiimage.New()` → `optiimage.New(optiimage.Options{})`, and
   `optiimage.NewWith(optiimage.Config{…})` → `optiimage.New(optiimage.Options{…})`.
@@ -394,13 +402,13 @@ process; a reader who already has the wrong one keeps it for at most
   negative duration).
 - Requires collage v0.61.0.
 
-### v0.3.6
+## Changed in v0.3.6
 
 - collage.json is regenerated for editors: duration examples are the
   generator's. Nothing else changes.
 - Requires collage v0.58.0.
 
-### v0.3.5
+## Changed in v0.3.5
 
 - **Images from an origin are no longer `immutable`.** They were served with
   `public, max-age=31536000, immutable` like every other image, but their names
@@ -413,20 +421,20 @@ process; a reader who already has the wrong one keeps it for at most
   alone, since `originMaxAge` is read the same way.
 - Requires collage v0.55.0.
 
-### v0.3.4
+## Changed in v0.3.4
 
 - Retracts v0.3.2, tagged by mistake on the previous release's code. Use v0.3.3 or later. Nothing else changes.
 
-### v0.3.3
+## Changed in v0.3.3
 
 - Requires collage v0.50.0. Plugin configuration is read with `collage.PluginConfig`, since `host.Config` is gone. Nothing else changes.
 
-### v0.3.1
+## Changed in v0.3.1
 
 - Built against collage v0.49.0, whose fragment data is a typed `collage.Data`;
   the tests use `collage.Load`. Requires collage v0.49.0.
 
-### v0.3.0
+## Changed in v0.3.0
 
 - **`Config.Files` reads the site's own images from its filesystem.** A path
   under a prefix — `/static/avatar.png` with `{"/static/": staticFS}` — is resized
@@ -434,13 +442,13 @@ process; a reader who already has the wrong one keeps it for at most
   name. Names of images from an origin are unchanged. See
   [The site's own images](#the-sites-own-images-files).
 
-### v0.2.3
+## Changed in v0.2.3
 
 - `collage.json`: the plugin described to editors — its template functions,
   snippets and configuration schema — for the Collage Snippets & Highlighter
   extension and any tool reading it.
 
-### v0.2.2
+## Changed in v0.2.2
 
 - Requires collage v0.24.0. Nothing else changes: collage now redirects a path
   with dot segments before it reaches `/_image/`, which the tests account for.

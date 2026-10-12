@@ -71,3 +71,28 @@ func TestConfig_RefusesAFilesPrefixThatIsNoPath(t *testing.T) {
 		t.Errorf("/static/ was refused: %v", err)
 	}
 }
+
+// An origin and an image URL match whether or not either spells the scheme's
+// default port; any other port is another origin.
+func TestConfig_AllowsTheDefaultPortEitherWay(t *testing.T) {
+	for _, c := range []struct {
+		origin, image string
+		want          bool
+	}{
+		{"https://cms.example.com:443", "https://cms.example.com/x.jpg", true},
+		{"https://cms.example.com", "https://cms.example.com:443/x.jpg", true},
+		{"http://cms.example.com:80", "http://CMS.example.com/x.jpg", true},
+		{"https://cms.example.com:443", "https://cms.example.com:8443/x.jpg", false},
+		{"https://cms.example.com:443", "http://cms.example.com/x.jpg", false},
+		{"http://cms.example.com:443", "http://cms.example.com/x.jpg", false},
+		{"https://[::1]:443", "https://[::1]/x.jpg", true},
+	} {
+		opts := Options{AllowedOrigins: []string{c.origin}}
+		if err := opts.withDefaults().validate(); err != nil {
+			t.Fatalf("%s: validate = %v", c.origin, err)
+		}
+		if _, got := opts.allows(c.image); got != c.want {
+			t.Errorf("%s allows %s = %v, want %v", c.origin, c.image, got, c.want)
+		}
+	}
+}
