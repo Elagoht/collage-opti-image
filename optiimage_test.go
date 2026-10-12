@@ -570,3 +570,27 @@ func templateFS() fstest.MapFS {
 	}
 	return fsys
 }
+
+// A host is compared without regard to case: an allowed origin written in lower
+// case allows an image URL whose host is upper case.
+func TestConfig_AllowedHostIgnoresCase(t *testing.T) {
+	_, srv := newOrigin(t, 40, 30)
+	u, _ := url.Parse(srv.URL)
+	site := newSite(t, optiimage.Options{AllowedOrigins: []string{"http://img.example:" + u.Port()}},
+		`<img src="http://IMG.example:`+u.Port()+`/a.png" width="20" height="10">`)
+	if src := srcOf(t, get(t, site, "/gallery").Body.String()); !strings.HasPrefix(src, "/_image/") {
+		t.Errorf("src = %q, want the upper-case host rewritten", src)
+	}
+}
+
+// Of several bad numbers, the one reported is always the same: the first in
+// the documented order.
+func TestConfig_BadNumbersReportedInOrder(t *testing.T) {
+	for range 20 {
+		_, err := collagetest.TrySite(t, siteOptions(optiimage.New(optiimage.Options{CacheDir: t.TempDir()}),
+			`{"maxSourceBytes": -1, "maxPixels": -1, "cacheBytes": -1}`, `<p></p>`)...)
+		if err == nil || !strings.Contains(err.Error(), "maxSourceBytes") {
+			t.Fatalf("start = %v, want maxSourceBytes reported first", err)
+		}
+	}
+}

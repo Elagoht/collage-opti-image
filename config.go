@@ -129,12 +129,18 @@ func (c Options) withDefaults() Options {
 
 // validate reports a configuration that cannot work.
 func (c Options) validate() error {
-	for key, value := range map[string]int64{
-		"maxSourceBytes": c.MaxSourceBytes, "maxPixels": int64(c.MaxPixels),
-		"cacheBytes": c.CacheBytes, "fetchTimeout": int64(c.FetchTimeout),
+	// In a fixed order, so of several bad numbers the same one is reported.
+	for _, n := range []struct {
+		key   string
+		value int64
+	}{
+		{"maxSourceBytes", c.MaxSourceBytes},
+		{"maxPixels", int64(c.MaxPixels)},
+		{"fetchTimeout", int64(c.FetchTimeout)},
+		{"cacheBytes", c.CacheBytes},
 	} {
-		if value < 0 {
-			return fmt.Errorf("opti-image: %s %d is negative; leave it out for the default", key, value)
+		if n.value < 0 {
+			return fmt.Errorf("opti-image: %s %d is negative; leave it out for the default", n.key, n.value)
 		}
 	}
 	if c.Quality < 0 || c.Quality > 100 {

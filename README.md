@@ -390,6 +390,8 @@ process; a reader who already has the wrong one keeps it for at most
   removed.
 - `maxSourceBytes`, `maxPixels`, `cacheBytes` and `quality` refuse a negative
   value, and `quality` one above 100, instead of falling back to the default.
+  So does a negative `Options.FetchTimeout` set from Go (JSON already refuses a
+  negative duration).
 - Requires collage v0.61.0.
 
 ### v0.3.6
