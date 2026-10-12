@@ -50,11 +50,7 @@ func TestPlugin_StaticBuildWritesTheImages(t *testing.T) {
 	}
 
 	out := t.TempDir()
-	builder, err := collage.NewBuilder(app, collage.BuildOptions{OutDir: out})
-	if err != nil {
-		t.Fatalf("NewBuilder: %v", err)
-	}
-	report, err := builder.Build(context.Background())
+	report, err := collage.Build(context.Background(), app, collage.BuildOptions{OutDir: out})
 	if err != nil {
 		t.Fatalf("Build: %v (%v)", err, report.Errors)
 	}
@@ -110,11 +106,7 @@ func TestPlugin_StaticBuildWritesNoImagesWhenNoneAreUsed(t *testing.T) {
 	}
 
 	out := t.TempDir()
-	builder, err := collage.NewBuilder(app, collage.BuildOptions{OutDir: out})
-	if err != nil {
-		t.Fatalf("NewBuilder: %v", err)
-	}
-	if _, err := builder.Build(context.Background()); err != nil {
+	if _, err := collage.Build(context.Background(), app, collage.BuildOptions{OutDir: out}); err != nil {
 		t.Fatalf("Build: %v", err)
 	}
 
