@@ -10,7 +10,7 @@ app, err := collage.New(&collage.Config{
 })
 ```
 
-Requires collage v0.61.0 or later. It must be supplied through `Config.Plugins`: it registers the routes it serves
+Requires collage v0.61.4 or later. It must be supplied through `Config.Plugins`: it registers the routes it serves
 images from, and that happens while the application is built.
 
 ## Configuration
@@ -380,7 +380,7 @@ process; a reader who already has the wrong one keeps it for at most
 - Fixed: an allowed origin that spells its scheme's default port,
   `https://cms.example.com:443`, was accepted at start but matched no image;
   the default port now matches whether either side writes it. Requires collage
-  v0.61.2.
+  v0.61.4.
 
 ## Changed in v0.4.0
 
